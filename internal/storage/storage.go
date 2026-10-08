@@ -49,7 +49,8 @@ func Open(path string) (*Store, error) {
 CREATE TABLE IF NOT EXISTS records (id INTEGER PRIMARY KEY, host_id TEXT NOT NULL, site_id TEXT NOT NULL, kind TEXT NOT NULL, observed_at TEXT NOT NULL, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS records_lookup ON records(host_id,kind,site_id,id DESC);
 CREATE INDEX IF NOT EXISTS records_time ON records(observed_at);
-CREATE TABLE IF NOT EXISTS dedup (host_id TEXT NOT NULL, kind TEXT NOT NULL, event_key TEXT NOT NULL, PRIMARY KEY(host_id,kind,event_key)); PRAGMA user_version=1;`)
+CREATE TABLE IF NOT EXISTS dedup (host_id TEXT NOT NULL, kind TEXT NOT NULL, event_key TEXT NOT NULL, PRIMARY KEY(host_id,kind,event_key));
+CREATE TABLE IF NOT EXISTS state (host_id TEXT NOT NULL, site_id TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(host_id,site_id,kind)); PRAGMA user_version=1;`)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -169,4 +170,38 @@ func (s *Store) AddOnce(ctx context.Context, host, site, kind, key string, at ti
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+func (s *Store) State(ctx context.Context, host, site, kind string) (json.RawMessage, error) {
+	var data string
+	err := s.DB.QueryRowContext(ctx, "SELECT data FROM state WHERE host_id=? AND site_id=? AND kind=?", host, site, kind).Scan(&data)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return json.RawMessage(data), err
+}
+
+func (s *Store) Transition(ctx context.Context, host, site, stateKind string, state any, eventKind string, at time.Time, event any) error {
+	data, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	eventData, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "INSERT INTO state(host_id,site_id,kind,data) VALUES(?,?,?,?) ON CONFLICT(host_id,site_id,kind) DO UPDATE SET data=excluded.data", host, site, stateKind, string(data)); err != nil {
+		return err
+	}
+	if string(eventData) != "null" {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES(?,?,?,?,?)", host, site, eventKind, at.UTC().Format(timestampLayout), string(eventData)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }

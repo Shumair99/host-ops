@@ -12,6 +12,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/events"
 	"github.com/Shumair99/host-ops/internal/health"
+	"github.com/Shumair99/host-ops/internal/incidents"
 	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
@@ -39,6 +40,11 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
 	}
 	if err := changes.Record(ctx, store, reports); err != nil {
 		return err
+	}
+	for _, r := range reports {
+		if _, err := incidents.Observe(ctx, store, r, "agent", 3, 2); err != nil {
+			return err
+		}
 	}
 	metricsCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

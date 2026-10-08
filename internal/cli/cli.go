@@ -31,6 +31,7 @@ Commands:
   deployments       Read deployment notifications
   logs <site>       Read a bounded, redacted runtime log stream
   diff [site]       Read infrastructure changes (--since 24h)
+  incidents         Read persisted outage and recovery evidence
 
 Options:
   --config FILE     Manifest (default: HOSTOPS_CONFIG or hostops.json)
@@ -45,7 +46,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 0
 	}
 	command := args[0]
-	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" {
+	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" {
 		fmt.Fprintf(errOut, "unknown command %q\n", command)
 		return 1
 	}
@@ -87,7 +88,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
-	if command == "metrics" || command == "history" || command == "disk" || command == "events" || command == "deployments" || command == "logs" || command == "diff" {
+	if command == "metrics" || command == "history" || command == "disk" || command == "events" || command == "deployments" || command == "logs" || command == "diff" || command == "incidents" {
 		return query(ctx, c, command, id, *db, *since, out, errOut)
 	}
 	if command == "sites" {

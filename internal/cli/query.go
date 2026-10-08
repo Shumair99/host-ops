@@ -73,6 +73,9 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 	if command == "diff" {
 		kind = "change"
 	}
+	if command == "incidents" {
+		kind = "incident"
+	}
 	records, err := store.Query(ctx, c.Host.ID, id, kind, time.Now().Add(-duration), 1000)
 	if err != nil {
 		fmt.Fprintln(errOut, "History query failed")

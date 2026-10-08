@@ -122,6 +122,22 @@ func Network(ctx context.Context, s config.Site) []model.Check {
 		}
 	}
 	checks = append(checks, dns)
+	port := u.Port()
+	if port == "" {
+		port = "80"
+		if u.Scheme == "https" {
+			port = "443"
+		}
+	}
+	tcp := model.Check{HostID: s.HostID, SiteID: s.ID, Layer: "tcp", State: model.Pass, Summary: "Public TCP endpoint reachable"}
+	connection, tcpErr := (&net.Dialer{Timeout: s.Timeout()}).DialContext(ctx, "tcp", net.JoinHostPort(u.Hostname(), port))
+	if tcpErr != nil {
+		tcp.State = model.Fail
+		tcp.Summary = "Public TCP connection failed"
+	} else {
+		connection.Close()
+	}
+	checks = append(checks, tcp)
 	tlsCheck := model.Check{HostID: s.HostID, SiteID: s.ID, Layer: "tls", State: model.Skip, Summary: "Public endpoint uses HTTP"}
 	if u.Scheme == "https" {
 		port := u.Port()
@@ -146,4 +162,10 @@ func Network(ctx context.Context, s config.Site) []model.Check {
 		}
 	}
 	return append(checks, tlsCheck)
+}
+
+func External(ctx context.Context, s config.Site) model.Report {
+	checks := Network(ctx, s)
+	checks = append(checks, HTTP(ctx, s, s.Health.PublicURL, "public_http"))
+	return model.Report{HostID: s.HostID, SiteID: s.ID, Name: s.Name, ObservedAt: time.Now().UTC(), Vantage: "external watcher (deploy separately from production)", Overall: model.Overall(checks), Checks: checks, Diagnoses: []model.Diagnosis{}}
 }

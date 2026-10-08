@@ -12,6 +12,8 @@ import (
 
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/deployments"
+	"github.com/Shumair99/host-ops/internal/diagnostics"
+	"github.com/Shumair99/host-ops/internal/incidents"
 	"github.com/Shumair99/host-ops/internal/logs"
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
@@ -73,6 +75,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/changes", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "change") })
 	mux.HandleFunc("GET /api/deployments", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "deployment") })
 	mux.HandleFunc("POST /api/deployments", s.deployment)
+	mux.HandleFunc("GET /api/incidents", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "incident") })
+	mux.HandleFunc("GET /api/external", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "external_health") })
+	mux.HandleFunc("POST /api/observations", s.observations)
 	mux.HandleFunc("GET /api/sites/{site}/logs", func(w http.ResponseWriter, r *http.Request) {
 		sites, err := s.Config.Select(r.PathValue("site"))
 		if err != nil {
@@ -204,4 +209,59 @@ func (s *Server) deployment(w http.ResponseWriter, r *http.Request) {
 		status = 201
 	}
 	JSON(w, status, d)
+}
+
+func (s *Server) observations(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
+	decoder := json.NewDecoder(r.Body)
+	var reports []model.Report
+	if decoder.Decode(&reports) != nil || len(reports) == 0 || len(reports) > len(s.Config.Sites) {
+		Error(w, 400, "Invalid observation batch")
+		return
+	}
+	seen := map[string]bool{}
+	for i := range reports {
+		report := &reports[i]
+		sites, err := s.Config.Select(report.SiteID)
+		if err != nil || seen[report.SiteID] || report.ObservedAt.After(time.Now().Add(time.Minute)) || report.ObservedAt.Before(time.Now().Add(-15*time.Minute)) {
+			Error(w, 400, "Unknown duplicate or stale site observation")
+			return
+		}
+		seen[report.SiteID] = true
+		report.HostID = s.Config.Host.ID
+		report.Name = sites[0].Name
+		report.Vantage = "external watcher report"
+		report.Runtime = model.Runtime{}
+		for j := range report.Checks {
+			check := &report.Checks[j]
+			if check.Layer != "dns" && check.Layer != "tcp" && check.Layer != "tls" && check.Layer != "public_http" {
+				Error(w, 400, "Invalid external check layer")
+				return
+			}
+			if check.State != model.Pass && check.State != model.Fail && check.State != model.Warn && check.State != model.Unknown && check.State != model.Skip {
+				Error(w, 400, "Invalid check state")
+				return
+			}
+			if len(check.Summary) > 512 {
+				Error(w, 400, "Check summary too long")
+				return
+			}
+			check.Summary = logs.Redact(check.Summary)
+			check.HostID = report.HostID
+			check.SiteID = report.SiteID
+		}
+		report.Overall = model.Overall(report.Checks)
+		report.Diagnoses = diagnostics.Diagnose(*report)
+	}
+	for _, report := range reports {
+		if _, err := s.Store.Add(r.Context(), report.HostID, report.SiteID, "external_health", report.ObservedAt, report); err != nil {
+			Error(w, 500, "Observation store unavailable")
+			return
+		}
+		if _, err := incidents.Observe(r.Context(), s.Store, report, "watcher", 3, 2); err != nil {
+			Error(w, 500, "Incident store unavailable")
+			return
+		}
+	}
+	JSON(w, 202, map[string]int{"accepted": len(reports)})
 }

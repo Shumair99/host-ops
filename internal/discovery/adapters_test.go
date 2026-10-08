@@ -16,6 +16,13 @@ func TestNginxExpandsDumpedIncludesAndKeepsPathBackends(t *testing.T) {
 	}
 }
 
+func TestTraefikPatternDoesNotPersistUnrelatedHeaderSecrets(t *testing.T) {
+	hosts, _, _ := TraefikRule("Header(`Authorization`, `Bearer secret`) && PathPrefix(`/api`)")
+	if len(hosts) != 1 || hosts[0] != "*" || strings.Contains(strings.Join(hosts, ""), "secret") {
+		t.Fatal("a raw rule was persisted as a domain pattern")
+	}
+}
+
 func TestTraefikExplicitHostsAndSecretsProjection(t *testing.T) {
 	routes, err := ParseTraefik([]byte(`{"routers":{"web@docker":{"rule":"Host(`+"`"+`example.com`+"`"+`) && PathPrefix(`+"`"+`/api`+"`"+`)","service":"web@docker","status":"enabled","tls":{}}},"services":{"web@docker":{"loadBalancer":{"servers":[{"url":"http://user:secret@web:80/?token=secret"}]}}}}`), "t", "proxy", []string{"docker:web"})
 	if err != nil {

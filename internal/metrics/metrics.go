@@ -156,11 +156,11 @@ func Bytes(raw string) (float64, error) {
 
 func Container(ctx context.Context, runner platform.Runner, s config.Site) Sample {
 	m := Sample{HostID: s.HostID, SiteID: s.ID, ObservedAt: time.Now().UTC(), Values: map[string]float64{}, Unavailable: []string{}}
-	if s.Runtime.Type != "docker" {
+	if s.Runtime.Type != "docker" && s.Runtime.Type != "podman" {
 		m.Unavailable = append(m.Unavailable, "container metrics do not apply to this runtime")
 		return m
 	}
-	data, err := runner.Run(ctx, "docker", "stats", "--no-stream", "--format", "{{json .}}", "--", s.Runtime.Container)
+	data, err := runner.Run(ctx, s.Runtime.Type, "stats", "--no-stream", "--format", "{{json .}}", "--", s.Runtime.Container)
 	if err != nil {
 		m.Unavailable = append(m.Unavailable, "container stats")
 		return m

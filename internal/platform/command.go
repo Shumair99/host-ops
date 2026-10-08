@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/Shumair99/host-ops/internal/config"
@@ -35,7 +36,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 }
 
 func (r Command) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	includeStderr := name == "docker" && len(args) > 0 && args[0] == "logs"
+	includeStderr := (name == "docker" || name == "podman") && len(args) > 0 && args[0] == "logs"
 	partialAccounting := name == "du"
 	if r.Host.SSH != "" {
 		parts := []string{Quote(name)}
@@ -43,6 +44,9 @@ func (r Command) Run(ctx context.Context, name string, args ...string) ([]byte, 
 			parts = append(parts, Quote(arg))
 		}
 		sshArgs := []string{"-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=5"}
+		if r.Host.SSHPort > 0 {
+			sshArgs = append(sshArgs, "-p", strconv.Itoa(r.Host.SSHPort))
+		}
 		if r.Host.IdentityFile != "" {
 			sshArgs = append(sshArgs, "-i", r.Host.IdentityFile)
 		}

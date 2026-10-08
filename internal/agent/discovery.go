@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"github.com/Shumair99/host-ops/internal/changes"
 	"github.com/Shumair99/host-ops/internal/collector"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/diagnostics"
@@ -10,8 +11,10 @@ import (
 	"github.com/Shumair99/host-ops/internal/events"
 	"github.com/Shumair99/host-ops/internal/health"
 	"github.com/Shumair99/host-ops/internal/incidents"
+	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/storage"
+	"net"
 	"sync"
 	"time"
 )
@@ -91,11 +94,19 @@ func baseReports(c config.Config, registry discovery.Registry, public map[string
 				r.Runtime.Status = w.Status
 				r.Runtime.Health = w.Health
 				r.Runtime.Image = w.Image
+				r.Runtime.ImageID, r.Runtime.RestartCount, r.Runtime.StartedAt = w.ImageID, w.RestartCount, w.StartedAt
 				r.Runtime.Commit = w.Revision
 				r.Runtime.RestartPolicy = w.RestartPolicy
 				r.Runtime.IPs = map[string]string{}
 				for n, net := range w.Networks {
 					r.Runtime.IPs[n] = net.IP
+				}
+				r.Runtime.Ports = map[string][]model.Port{}
+				for port, bindings := range w.Ports {
+					for _, binding := range bindings {
+						ip, hostPort, _ := net.SplitHostPort(binding)
+						r.Runtime.Ports[port] = append(r.Runtime.Ports[port], model.Port{HostIP: ip, HostPort: hostPort})
+					}
 				}
 			}
 			if w.Health != "" && w.Health != "none" {
@@ -110,6 +121,9 @@ func baseReports(c config.Config, registry discovery.Registry, public map[string
 				}
 				check("container_health", state, w.Name+": "+w.Health)
 			}
+		}
+		if item.State == "unresolved" && len(item.WorkloadIDs) > 0 {
+			check("runtime", model.Unknown, "Some route backends could not be mapped to workloads")
 		}
 		proxyState, summary := model.Warn, "Declared route found; loaded state unverified"
 		for _, route := range item.Routes {
@@ -185,6 +199,9 @@ func persistReports(ctx context.Context, c config.Config, store *storage.Store, 
 	if err = events.Record(ctx, store, previous, reports); err != nil {
 		return err
 	}
+	if err = changes.Record(ctx, store, reports); err != nil {
+		return err
+	}
 	for _, r := range incidents.GroupReports(c, reports, "agent") {
 		if _, err = incidents.Observe(ctx, store, r, "agent", 3, 2); err != nil {
 			return err
@@ -240,22 +257,47 @@ func CollectOnce(ctx context.Context, c config.Config, store *storage.Store) err
 	}
 	resolved := discovery.ConfigSites(registry, c)
 	public := probePublic(ctx, resolved, nil, nil)
+	// Long public probes must not leave a one-shot dashboard with old telemetry.
+	for {
+		message, readErr := session.Next()
+		if readErr != nil {
+			return readErr
+		}
+		if message.Kind == "host_metrics" && message.Sample != nil && time.Since(message.Sample.ObservedAt) < 2*time.Second {
+			if err = store.Transition(ctx, c.Host.ID, "", "host_metrics", *message.Sample, "", message.ObservedAt, nil); err != nil {
+				return err
+			}
+			break
+		}
+	}
 	return persistReports(ctx, resolved, store, baseReports(resolved, registry, public.checks))
 }
 
 // RunLive owns the only collector session and schedules public checks independently
 // of fast telemetry. Reconnection reuses the same protocol and reconciliation.
 func RunLive(ctx context.Context, c config.Config, store *storage.Store, interval time.Duration, wake <-chan struct{}) error {
-	startup, startCancel := context.WithTimeout(ctx, 45*time.Second)
-	path, err := collector.Bootstrap(startup, c)
-	startCancel()
-	if err != nil {
-		_ = connection(ctx, store, c.Host.ID, false, err.Error())
+	if interval < 5*time.Second {
+		return fmt.Errorf("public check interval must be at least 5s")
+	}
+	if err := connection(ctx, store, c.Host.ID, false, "Connecting to collector"); err != nil {
 		return err
 	}
+	path := ""
+	var err error
 	backoff := time.Second
 	for ctx.Err() == nil {
-		err = stream(ctx, c, store, path, interval, wake)
+		if path == "" {
+			startup, startCancel := context.WithTimeout(ctx, 45*time.Second)
+			path, err = collector.Bootstrap(startup, c)
+			startCancel()
+		}
+		if err == nil {
+			started := time.Now()
+			err = stream(ctx, c, store, path, interval, wake)
+			if time.Since(started) >= 30*time.Second {
+				backoff = time.Second
+			}
+		}
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -268,6 +310,9 @@ func RunLive(ctx context.Context, c config.Config, store *storage.Store, interva
 		case <-timer.C:
 		}
 		backoff = min(30*time.Second, backoff*2)
+		if path != "" {
+			err = nil
+		}
 	}
 	return nil
 }
@@ -308,6 +353,7 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 	public := map[string][]model.Check{}
 	networkAt := map[string]time.Time{}
 	lastHistory := time.Time{}
+	lastWorkloadHistory := time.Time{}
 	lastRetain := time.Time{}
 	launch := func() {
 		if busy || len(resolved.Sites) == 0 {
@@ -378,23 +424,19 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 					lastHistory = time.Now()
 				}
 			case "workload_metrics":
-				for _, sample := range message.Samples {
-					for _, site := range registry.Sites {
-						for _, id := range site.WorkloadIDs {
-							if id == sample.SiteID {
-								sample.SiteID = site.ID
-								for _, s := range resolved.Sites {
-									if s.Proxy.Domain == site.Domain {
-										sample.SiteID = s.ID
-									}
-								}
-								if err = store.Transition(ctx, c.Host.ID, sample.SiteID, "metrics", sample, "", sample.ObservedAt, nil); err != nil {
-									return err
-								}
-								break
-							}
+				historyDue := time.Since(lastWorkloadHistory) >= 15*time.Second
+				for _, sample := range siteSamples(registry, resolved, message.Samples) {
+					if err = store.Transition(ctx, c.Host.ID, sample.SiteID, "metrics", sample, "", sample.ObservedAt, nil); err != nil {
+						return err
+					}
+					if historyDue {
+						if _, err = store.Add(ctx, c.Host.ID, sample.SiteID, "metrics", sample.ObservedAt, sample); err != nil {
+							return err
 						}
 					}
+				}
+				if historyDue {
+					lastWorkloadHistory = time.Now()
 				}
 			}
 			if time.Since(lastRetain) >= time.Hour {
@@ -405,4 +447,47 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 			}
 		}
 	}
+}
+
+func siteSamples(registry discovery.Registry, c config.Config, samples []metrics.Sample) []metrics.Sample {
+	byID := map[string]metrics.Sample{}
+	for _, sample := range samples {
+		byID[sample.SiteID] = sample
+	}
+	out := []metrics.Sample{}
+	for _, site := range registry.Sites {
+		if site.State == "removed" || len(site.WorkloadIDs) == 0 {
+			continue
+		}
+		id := site.ID
+		for _, s := range c.Sites {
+			if s.Proxy.Domain == site.Domain {
+				id = s.ID
+			}
+		}
+		combined := metrics.Sample{HostID: c.Host.ID, SiteID: id, Values: map[string]float64{}, Unavailable: []string{}}
+		for _, workloadID := range site.WorkloadIDs {
+			sample, ok := byID[workloadID]
+			if !ok {
+				combined.Unavailable = append(combined.Unavailable, "Backend metric not available: "+workloadID)
+				continue
+			}
+			combined.Unavailable = append(combined.Unavailable, sample.Unavailable...)
+			if combined.ObservedAt.IsZero() || sample.ObservedAt.Before(combined.ObservedAt) {
+				combined.ObservedAt = sample.ObservedAt
+			}
+			for key, value := range sample.Values {
+				if len(site.WorkloadIDs) == 1 {
+					combined.Values[key] = value
+				} else if key == "cpu_percent" || key == "memory_used_bytes" || key == "network_rx_bytes" || key == "network_tx_bytes" {
+					combined.Values[key] += value
+				}
+			}
+		}
+		if combined.ObservedAt.IsZero() {
+			combined.ObservedAt = time.Now().UTC()
+		}
+		out = append(out, combined)
+	}
+	return out
 }

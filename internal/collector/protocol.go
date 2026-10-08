@@ -86,8 +86,13 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 					lastDisk = time.Now()
 				}
 			}
-			for key, value := range disk {
-				sample.Values[key] = value
+			if !lastDisk.IsZero() && time.Since(lastDisk) <= 60*time.Second {
+				for key, value := range disk {
+					sample.Values[key] = value
+				}
+				sample.Values["disk_observed_unix_seconds"] = float64(lastDisk.Unix())
+			} else {
+				sample.Unavailable = append(sample.Unavailable, "Root filesystem sample unavailable or stale")
 			}
 			if !send(Message{Kind: "host_metrics", Sample: &sample, ObservedAt: sample.ObservedAt}) {
 				return

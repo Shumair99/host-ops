@@ -51,11 +51,11 @@ Your existing private manifest is at `local/hostops.json`. Start:
 .\scripts\dev.ps1
 ```
 
-The header now says `LIVE / READ-ONLY`. The dashboard loads retained observations and immediately starts fresh checks; unavailable or stale evidence remains visible. It collects again every 60 seconds, or at `--interval 30s`. Collection cycles do not overlap. Closing the terminal dashboard cancels its reads and stops its collector.
+The header now says `LIVE / READ-ONLY`. The dashboard loads retained observations and starts one streaming SSH collector. CPU/RAM update every second, container stats every five seconds, and inventory/root disk every 30 seconds. Public HTTP uses `--interval` (default 30 seconds); DNS/TLS use five minutes. The first resource sample appears automatically, without pressing a key. Closing the dashboard cancels its reads and stops its collector.
 
-The current local manifest registers one reference property. Add the other sites to that manifest to monitor their full paths individually; discovering a container does not automatically register a production property. Use the templates under `examples/sites/`. Public checks run from this computer, while configured SSH performs runtime/host checks on the VPS.
+The sites list comes from discovered proxy domains. Your existing reference property's JSON entry retains its display name and health preferences; other sites appear without registration. Press `z` to inspect sources, routes and workloads. Domain aliases can be separate entries for the same application. Wildcard/catch-all routes stay visible as coverage patterns. Public checks run from this computer, while the collector reads host/runtime configuration on the VPS.
 
-`host.ssh` uses your existing SSH identity and trusted host key, in batch mode with strict host-key checking. HostOps does not request a token or install an agent on the VPS. Disk, Security, Preflight and runtime log views run bounded read-only inspections when opened or reloaded. Disk scans can take longer than ordinary history reads; switch views or quit while they run.
+For another VPS, run `hostops connect user@vps` first, optionally with `--identity FILE` or `--port 2222`. It writes connection settings after a successful inspection. SSH uses your existing identity and trusted host key in batch mode. The bundled Linux collector runs from the remote user's private cache; it installs no service and needs no dashboard token. Disk, Security, Preflight and runtime log views run bounded inspections on demand. Disk scans can take longer than history reads; switch views or quit while they run. See [discovery support and limitations](discovery.md).
 
 The live root disk was measured at 88% used during verification. Open `d` to inspect directory sizes and Docker storage. Figures marked incomplete are lower bounds, not full totals. HostOps supplies evidence for a later cleanup decision; no keyboard shortcut deletes files or prunes Docker.
 
@@ -71,7 +71,8 @@ The live root disk was measured at 88% used during verification. Open `d` to ins
 | `/` on Sites | Filter by name, ID or domain |
 | `/` on Impact | Change resource being assessed |
 | Space | Reload the current view |
-| F5 | Collect fresh live observations |
+| F5 | Request inventory refresh and public checks |
+| `z` | Inventory, source coverage, routes and workloads |
 | `l`, `a`, `b` from property | Logs, site readiness, site recovery |
 | Esc | Return from property/logs; cancel input or clear site filter |
 | `w` on Incidents | Export newest listed incident capsule |
@@ -79,17 +80,17 @@ The live root disk was measured at 88% used during verification. Open `d` to ins
 | `?` | Help |
 | `q` / Ctrl+C | Quit and restore terminal |
 
-Views: `o` Overview, `s` Sites, `i` Issues, `h` Host metrics, `d` Disk, `r` Readiness, `e` Events, `g` Changes, `y` Deployments, `n` Incidents, `v` History, `m` External watcher checks, `u` Security, `c` Costs, `p` Capacity, `b` Recovery, `f` reboot Preflight, `x` Impact. The menu scrolls to keep the active view visible.
+Views: `o` Overview, `s` Sites, `i` Issues, `h` Host metrics, `z` Inventory, `d` Disk, `r` Readiness, `e` Events, `g` Changes, `y` Deployments, `n` Incidents, `v` History, `m` External watcher checks, `u` Security, `c` Costs, `p` Capacity, `b` Recovery, `f` reboot Preflight, `x` Impact. The menu scrolls to keep the active view visible.
 
 ## Optional background collector and plain commands
 
 If you want history to continue while the dashboard is closed, run the headless collector in a separate terminal:
 
 ```powershell
-.\bin\hostops-agent.exe --config local/hostops.json --db local/hostops.db --interval 60s
+.\bin\hostops-agent.exe --config local/hostops.json --db local/hostops.db --interval 30s
 ```
 
-Then open the dashboard against the same database with `--no-collect`. That disables automatic collection cycles; inspection views can still run manual reads. Use one active collector per database to avoid duplicate samples. The collector stops with Ctrl+C and opens no management port.
+Then open the dashboard against the same database with `--no-collect`. That uses the agent's inventory and metrics; inspection views can still run manual reads. Use one active collector per database to avoid duplicate samples. The collector stops with Ctrl+C and opens no management port.
 
 ```powershell
 .\bin\hostops.exe dashboard --config local/hostops.json --no-collect

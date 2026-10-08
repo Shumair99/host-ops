@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/model"
@@ -22,7 +23,8 @@ func InspectDocker(ctx context.Context, runner platform.Runner, s config.Site) (
 		return r, []model.Check{check("docker", model.Unknown, "Docker is unavailable or access is denied"), check("runtime", model.Unknown, "Container could not be inspected")}
 	}
 	checks := []model.Check{check("docker", model.Pass, "Docker daemon reachable")}
-	data, err := runner.Run(ctx, "docker", "container", "inspect", "--format", inspectFormat, "--", s.Runtime.Container)
+	format := strings.Replace(inspectFormat, `{{if .State.Health}}`, `{{if index .State "Health"}}`, 1)
+	data, err := runner.Run(ctx, "docker", "container", "inspect", "--format", format, "--", s.Runtime.Container)
 	if err != nil {
 		return r, append(checks, check("runtime", model.Unknown, "Container missing or inspection denied"))
 	}

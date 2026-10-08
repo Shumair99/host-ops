@@ -20,3 +20,17 @@ func TestImpactAndMissingEvidenceBlockGreenRecommendation(t *testing.T) {
 		t.Fatal("unknown preflight returned green")
 	}
 }
+
+func TestDiscoveredDependenciesIncludeEveryBackendAndProxy(t *testing.T) {
+	c := config.Config{Host: config.Host{ID: "h"}, Sites: []config.Site{{ID: "a", Discovered: true, Proxy: config.Proxy{Domain: "a.example"}, Dependencies: []string{"docker", "caddy", "proxy-a", "backend-1", "backend-2"}}, {ID: "b", Discovered: true, Proxy: config.Proxy{Domain: "b.example"}, Dependencies: []string{"systemd", "nginx", "proxy-b"}}}}
+	for _, resource := range []string{"backend-2", "proxy-a", "caddy", "docker"} {
+		impact, err := Dependency(c, resource)
+		if err != nil || len(impact.Affected) != 1 || impact.Affected[0].ID != "a" {
+			t.Fatalf("%s affects wrong sites: %+v %v", resource, impact, err)
+		}
+	}
+	impact, err := Dependency(c, "nginx")
+	if err != nil || len(impact.Affected) != 1 || impact.Affected[0].ID != "b" {
+		t.Fatal(impact, err)
+	}
+}

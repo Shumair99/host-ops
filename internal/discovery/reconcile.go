@@ -98,6 +98,7 @@ func Reconcile(next Snapshot, previous Registry) Registry {
 			s := current[route.SourceID]
 			fresh = fresh || s.State == "ready"
 			active = active || s.State == "ready" && s.Mode == "active"
+			unresolved = unresolved || route.Kind == "opaque" || route.Kind == "proxy" && (len(route.Upstreams) == 0 || strings.Contains(route.Note, "Dynamic upstream"))
 			for _, upstream := range route.Upstreams {
 				ids := ResolveUpstream(upstream, route, next)
 				if len(ids) == 0 {

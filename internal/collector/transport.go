@@ -2,6 +2,7 @@ package collector
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -32,6 +34,9 @@ type Session struct {
 
 func sshArgs(h config.Host) []string {
 	args := []string{"-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2"}
+	if h.SSHPort > 0 {
+		args = append(args, "-p", strconv.Itoa(h.SSHPort))
+	}
 	if h.IdentityFile != "" {
 		args = append(args, "-i", h.IdentityFile)
 	}
@@ -70,13 +75,16 @@ func Bootstrap(ctx context.Context, c config.Config) (string, error) {
 	if len(binary) < 20 || string(binary[:4]) != "\x7fELF" {
 		return "", fmt.Errorf("collector file must be a Linux executable")
 	}
+	machine := int(binary[18]) | int(binary[19])<<8
+	if binary[5] != 1 || arch == "amd64" && machine != 62 || arch == "arm64" && machine != 183 {
+		return "", fmt.Errorf("collector executable does not match the VPS architecture")
+	}
 	sum := sha256.Sum256(binary)
 	hash := hex.EncodeToString(sum[:])
-	name := "collector-" + hash
 	// Fixed script, with the content-addressed name as the only interpolated value.
-	command := `umask 077; taskCache="${XDG_CACHE_HOME:-$HOME/.cache}/hostops"; test ! -L "$taskCache" && mkdir -p "$taskCache" && chmod 700 "$taskCache" || exit 1; taskTmp="$taskCache/` + name + `.upload"; cat > "$taskTmp" && printf '%s  %s\n' '` + hash + `' "$taskTmp" | sha256sum -c - >/dev/null && chmod 700 "$taskTmp" && mv -- "$taskTmp" "$taskCache/` + name + `" && printf '%s' "$taskCache/` + name + `"`
+	command := uploadCommand(hash)
 	cmd := exec.CommandContext(ctx, "ssh", append(sshArgs(c.Host), command)...)
-	cmd.Stdin = strings.NewReader(string(binary))
+	cmd.Stdin = bytes.NewReader(binary)
 	var out limitedWriter
 	cmd.Stdout = &out
 	cmd.Stderr = io.Discard
@@ -88,6 +96,11 @@ func Bootstrap(ctx context.Context, c config.Config) (string, error) {
 		return "", fmt.Errorf("invalid collector cache path")
 	}
 	return remote, nil
+}
+
+func uploadCommand(hash string) string {
+	name := "collector-" + hash
+	return `umask 077; taskCache="${XDG_CACHE_HOME:-$HOME/.cache}/hostops"; test ! -L "$taskCache" && mkdir -p "$taskCache" && chmod 700 "$taskCache" || exit 1; taskTmp="$taskCache/` + name + `.upload-$$"; trap 'rm -f -- "$taskTmp"' EXIT; cat > "$taskTmp" && printf '%s  %s\n' '` + hash + `' "$taskTmp" | sha256sum -c - >/dev/null && chmod 700 "$taskTmp" && mv -- "$taskTmp" "$taskCache/` + name + `" && printf '%s' "$taskCache/` + name + `"`
 }
 
 type limitedWriter struct{ data []byte }

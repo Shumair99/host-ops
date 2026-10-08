@@ -29,6 +29,24 @@ func TestDiscoveryKeepsDownSitesAndPreservesUnavailableSources(t *testing.T) {
 	}
 }
 
+func TestEmptyActiveProxySuppressesDeclaredRoutes(t *testing.T) {
+	snapshot := Snapshot{HostID: "h", ObservedAt: time.Now(), Sources: []Source{{ID: "active", ProxyID: "p", State: "ready", Mode: "active"}, {ID: "declared", ProxyID: "p", State: "ready", Mode: "configured"}}, Routes: []Route{{ID: "r", ProxyID: "p", SourceID: "declared", Hosts: []string{"example.com"}}}}
+	if got := Reconcile(snapshot, Registry{}); len(got.Sites) != 0 {
+		t.Fatal("a declared route overrode an empty loaded configuration")
+	}
+}
+
+func TestStoppedHostProxyRetainsItsLastKnownDomains(t *testing.T) {
+	at := time.Now()
+	previous := Reconcile(Snapshot{HostID: "h", ObservedAt: at, Sources: []Source{{ID: "linux/processes", State: "ready"}, {ID: "p", ParentID: "linux/processes", Mode: "configured", State: "ready"}}, Routes: []Route{{ID: "r", SourceID: "p", Hosts: []string{"example.com"}}}}, Registry{})
+	for n := 1; n <= 3; n++ {
+		previous = Reconcile(Snapshot{HostID: "h", ObservedAt: at.Add(time.Duration(n) * time.Minute), Sources: []Source{{ID: "linux/processes", State: "ready"}}}, previous)
+	}
+	if len(previous.Sites) != 1 || previous.Sites[0].State != "stale" || len(previous.Sites[0].Routes) == 0 {
+		t.Fatal("a stopped proxy erased the affected domains")
+	}
+}
+
 func TestUpstreamAliasesAreScopedToProxyNetwork(t *testing.T) {
 	snapshot := Snapshot{Workloads: []Workload{{ID: "a", Name: "first", Networks: map[string]Network{"one": {Aliases: []string{"web"}}}}, {ID: "b", Name: "second", Networks: map[string]Network{"two": {Aliases: []string{"web"}}}}}}
 	ids := ResolveUpstream("web:80", Route{Networks: []string{"two"}}, snapshot)

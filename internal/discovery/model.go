@@ -41,6 +41,9 @@ type Workload struct {
 	Status        string              `json:"status"`
 	Health        string              `json:"health,omitempty"`
 	Image         string              `json:"image,omitempty"`
+	ImageID       string              `json:"image_id,omitempty"`
+	RestartCount  int                 `json:"restart_count,omitempty"`
+	StartedAt     string              `json:"started_at,omitempty"`
 	Revision      string              `json:"revision,omitempty"`
 	RestartPolicy string              `json:"restart_policy,omitempty"`
 	Networks      map[string]Network  `json:"networks,omitempty"`

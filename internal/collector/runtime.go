@@ -14,6 +14,7 @@ import (
 
 type containerMeta struct {
 	ID, Name, Path, Image string
+	RestartCount          int
 	Args                  []string
 	Config                struct {
 		Image           string
@@ -25,6 +26,7 @@ type containerMeta struct {
 		Health      *struct{ Status string }
 		Healthcheck *struct{ Status string }
 		Pid         int
+		StartedAt   string
 	}
 	HostConfig struct {
 		RestartPolicy struct{ Name string }
@@ -41,7 +43,7 @@ type containerMeta struct {
 	Engine string
 }
 
-const discoveryInspect = `{"Id":{{json .Id}},"Name":{{json .Name}},"Path":{{json .Path}},"Args":{{json .Args}},"Config":{"Image":{{json .Config.Image}},"Labels":{"com.docker.compose.project":{{json (index .Config.Labels "com.docker.compose.project")}},"com.docker.compose.service":{{json (index .Config.Labels "com.docker.compose.service")}},"org.opencontainers.image.revision":{{json (index .Config.Labels "org.opencontainers.image.revision")}}},"State":{"Status":{{json .State.Status}},"Pid":{{.State.Pid}},"Health":{{if .State.Health}}{"Status":{{json .State.Health.Status}}}{{else}}null{{end}}},"HostConfig":{"RestartPolicy":{"Name":{{json .HostConfig.RestartPolicy.Name}}},"NetworkMode":{{json .HostConfig.NetworkMode}}},"NetworkSettings":{"Networks":{{json .NetworkSettings.Networks}},"Ports":{{json .NetworkSettings.Ports}}},"Mounts":{{json .Mounts}}}`
+const discoveryInspect = `{"Id":{{json .Id}},"Name":{{json .Name}},"Path":{{json .Path}},"Args":{{json .Args}},"Image":{{json .Image}},"RestartCount":{{.RestartCount}},"Config":{"Image":{{json .Config.Image}},"Labels":{{json .Config.Labels}}},"State":{"Status":{{json .State.Status}},"Pid":{{.State.Pid}},"StartedAt":{{json .State.StartedAt}},"Health":{{if index .State "Health"}}{"Status":{{json .State.Health.Status}}}{{else}}null{{end}}},"HostConfig":{"RestartPolicy":{"Name":{{json .HostConfig.RestartPolicy.Name}}},"NetworkMode":{{json .HostConfig.NetworkMode}}},"NetworkSettings":{"Networks":{{json .NetworkSettings.Networks}},"Ports":{{json .NetworkSettings.Ports}}},"Mounts":{{json .Mounts}}}`
 
 func readRuntime(ctx context.Context, runner platform.Runner, engine string, snapshot *discovery.Snapshot) []containerMeta {
 	source := discovery.Source{ID: "runtime/" + engine, Kind: engine, Mode: "active", State: "ready", ObservedAt: snapshot.ObservedAt}
@@ -60,11 +62,7 @@ func readRuntime(ctx context.Context, runner platform.Runner, engine string, sna
 	out := []containerMeta{}
 	for start := 0; start < len(ids); start += 32 {
 		end := min(len(ids), start+32)
-		const selectedLabels = `{"com.docker.compose.project":{{json (index .Config.Labels "com.docker.compose.project")}},"com.docker.compose.service":{{json (index .Config.Labels "com.docker.compose.service")}},"org.opencontainers.image.revision":{{json (index .Config.Labels "org.opencontainers.image.revision")}}}`
-		// Only selected identity/routing facts leave the collector. Arbitrary
-		// labels and authentication middleware values are discarded locally.
-		format := strings.Replace(discoveryInspect, selectedLabels, `{{json .Config.Labels}}`, 1)
-		args := []string{"container", "inspect", "--format", format, "--"}
+		args := []string{"container", "inspect", "--format", inspectProjection(), "--"}
 		if engine == "podman" {
 			args = []string{"container", "inspect", "--format", "{{json .}}", "--"}
 		}
@@ -89,6 +87,7 @@ func readRuntime(ctx context.Context, runner platform.Runner, engine string, sna
 			}
 			// Replicas share a service; retain their individual instances in the graph.
 			w := discovery.Workload{ID: discovery.StableID("workload", snapshot.HostID+"|"+engine+"|"+identity+"|"+meta.Name), InstanceID: meta.ID, SourceID: source.ID, Type: engine, Name: meta.Name, Project: project, Service: service, Image: meta.Config.Image, Revision: meta.Config.Labels["org.opencontainers.image.revision"], Status: meta.State.Status, Health: "none", RestartPolicy: meta.HostConfig.RestartPolicy.Name, Networks: map[string]discovery.Network{}, Ports: map[string][]string{}, PID: meta.State.Pid, ProxyKind: proxyKind(meta.Path, meta.Config.Image)}
+			w.ImageID, w.RestartCount, w.StartedAt = meta.Image, meta.RestartCount, meta.State.StartedAt
 			if meta.State.Health != nil {
 				w.Health = meta.State.Health.Status
 			}
@@ -130,6 +129,10 @@ func proxyKind(executable, image string) string {
 		return "apache"
 	}
 	return ""
+}
+
+func inspectProjection() string {
+	return discoveryInspect
 }
 
 func inspectionContext(ctx context.Context) (context.Context, context.CancelFunc) {

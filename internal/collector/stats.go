@@ -25,7 +25,8 @@ func workloadStats(ctx context.Context, runner platform.Runner, snapshot discove
 		if len(names) == 0 {
 			continue
 		}
-		data, err := runner.Run(ctx, engine, append([]string{"stats", "--no-stream", "--format", "{{json .}}", "--"}, names...)...)
+		format := `{"Name":{{json .Name}},"CPUPerc":{{json .CPUPerc}},"MemPerc":{{json .MemPerc}},"MemUsage":{{json .MemUsage}},"NetIO":{{json .NetIO}}}`
+		data, err := runner.Run(ctx, engine, append([]string{"stats", "--no-stream", "--format", format, "--"}, names...)...)
 		if err != nil {
 			for _, name := range names {
 				out = append(out, metrics.Sample{HostID: snapshot.HostID, SiteID: byName[name].ID, ObservedAt: time.Now().UTC(), Values: map[string]float64{}, Unavailable: []string{"Workload metrics unavailable"}})
@@ -64,8 +65,20 @@ func workloadStats(ctx context.Context, runner platform.Runner, snapshot discove
 					}
 				}
 			}
-			if len(sample.Values) == 0 {
-				sample.Unavailable = append(sample.Unavailable, "Runtime stats format not supported")
+			if raw, ok := fields["NetIO"].(string); ok {
+				pieces := strings.Split(raw, " / ")
+				if len(pieces) == 2 {
+					for index, key := range []string{"network_rx_bytes", "network_tx_bytes"} {
+						if n, err := metrics.Bytes(pieces[index]); err == nil {
+							sample.Values[key] = n
+						}
+					}
+				}
+			}
+			for _, key := range []string{"cpu_percent", "memory_percent", "memory_used_bytes", "network_rx_bytes", "network_tx_bytes"} {
+				if _, ok := sample.Values[key]; !ok {
+					sample.Unavailable = append(sample.Unavailable, key+": runtime did not provide a usable value")
+				}
 			}
 			out = append(out, sample)
 		}

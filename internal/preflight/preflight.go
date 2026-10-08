@@ -10,6 +10,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/recovery"
 	runtimecheck "github.com/Shumair99/host-ops/internal/runtime"
 	"github.com/Shumair99/host-ops/internal/storage"
+	"sort"
 	"strings"
 	"time"
 )
@@ -23,28 +24,45 @@ type Impact struct {
 }
 
 func Dependency(c config.Config, resource string) (Impact, error) {
-	r := Impact{HostID: c.Host.ID, Resource: resource, Affected: []config.Site{}, Dependencies: []string{}, Notes: []string{"This is a read-only simulation from the registered dependency graph; no failure is induced.", "Unregistered resources and hidden application dependencies may expand the actual blast radius."}}
+	r := Impact{HostID: c.Host.ID, Resource: resource, Affected: []config.Site{}, Dependencies: []string{}, Notes: []string{"This is a read-only simulation from observed or configured dependencies; no failure is induced.", "Unresolved routes and hidden application dependencies may expand the actual blast radius."}}
 	known := false
+	dependencies := map[string]bool{"host:" + c.Host.ID: true}
 	for _, s := range c.Sites {
 		affects := resource == "host" || resource == c.Host.ID || resource == s.ID || resource == s.Runtime.Container || resource == s.Runtime.Unit || resource == s.Runtime.Directory || resource == s.Proxy.Domain
-		if resource == "caddy" || resource == c.Host.CaddyContainer {
-			affects = s.Proxy.Domain != ""
-		}
-		if resource == "docker" {
-			affects = s.Runtime.Type == "docker" || c.Host.CaddyContainer != "" && s.Proxy.Domain != ""
+		if s.Discovered {
+			for _, dependency := range s.Dependencies {
+				affects = affects || dependency == resource
+			}
+		} else {
+			if resource == "caddy" || c.Host.CaddyContainer != "" && resource == c.Host.CaddyContainer {
+				affects = s.Proxy.Domain != ""
+			}
+			if resource == "docker" {
+				affects = s.Runtime.Type == "docker" || c.Host.CaddyContainer != "" && s.Proxy.Domain != ""
+			}
 		}
 		if affects {
 			known = true
 			r.Affected = append(r.Affected, s)
+			for _, dependency := range s.Dependencies {
+				dependencies[dependency] = true
+			}
 		}
 	}
 	if !known {
 		return r, fmt.Errorf("resource is not registered in the dependency graph")
 	}
-	r.Dependencies = []string{"host:" + c.Host.ID}
 	if c.Host.CaddyContainer != "" {
-		r.Dependencies = append(r.Dependencies, "docker", "caddy:"+c.Host.CaddyContainer)
+		for _, site := range r.Affected {
+			if !site.Discovered {
+				dependencies["docker"], dependencies["caddy:"+c.Host.CaddyContainer] = true, true
+			}
+		}
 	}
+	for dependency := range dependencies {
+		r.Dependencies = append(r.Dependencies, dependency)
+	}
+	sort.Strings(r.Dependencies)
 	return r, nil
 }
 

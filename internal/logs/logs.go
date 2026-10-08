@@ -36,12 +36,12 @@ func Read(ctx context.Context, runner platform.Runner, s config.Site) (string, e
 	var data []byte
 	var err error
 	switch s.Runtime.Type {
-	case "docker":
-		data, err = runner.Run(ctx, "docker", "logs", "--tail", "200", "--timestamps", "--", s.Runtime.Container)
+	case "docker", "podman":
+		data, err = runner.Run(ctx, s.Runtime.Type, "logs", "--tail", "200", "--timestamps", "--", s.Runtime.Container)
 	case "systemd":
 		data, err = runner.Run(ctx, "journalctl", "--no-pager", "--lines=200", "--unit", s.Runtime.Unit)
 	default:
-		return "Static sites do not have an application log stream.", nil
+		return "No application log reader applies to this runtime.", nil
 	}
 	if err != nil {
 		return "", err

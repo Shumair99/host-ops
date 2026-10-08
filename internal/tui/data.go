@@ -100,6 +100,18 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 			r.Checks = append(r.Checks, model.Check{Layer: "collector", State: model.Unknown, Summary: "Observations are stale"})
 			r.Overall = model.Overall(r.Checks)
 		}
+		if s.Live && !snapshot.Connection.Connected {
+			for i := range r.Checks {
+				if r.Checks[i].Layer == "runtime" || r.Checks[i].Layer == "container_health" || r.Checks[i].Layer == "proxy_route" {
+					if r.Checks[i].State != model.Skip {
+						r.Checks[i].State = model.Unknown
+						r.Checks[i].Summary = "Collector unavailable: " + r.Checks[i].Summary
+					}
+				}
+			}
+			r.Checks = append(r.Checks, model.Check{Layer: "collector", State: model.Unknown, Summary: "Collector connection unavailable"})
+			r.Overall = model.Overall(r.Checks)
+		}
 		snapshot.Reports = append(snapshot.Reports, r)
 	}
 	host, err := s.Store.Query(ctx, s.Config.Host.ID, "", "host_metrics", time.Time{}, 1)
@@ -147,7 +159,11 @@ func (s Source) Page(ctx context.Context, page, siteID, target string, snapshot 
 	}
 	switch page {
 	case "inventory":
-		return inventoryLines(snapshot.Inventory), nil
+		lines := inventoryLines(snapshot.Inventory)
+		if s.Live && !snapshot.Connection.Connected {
+			lines = append([]string{"Collector unavailable; showing retained inventory", ""}, lines...)
+		}
+		return lines, nil
 	case "overview", "sites", "issues":
 		return nil, nil
 	case "site":
@@ -277,5 +293,34 @@ func chain(r model.Report) string {
 
 func HelpLines() []string {
 	return []string{
-		"AMADEUS HOSTOPS - TERMINAL OPERATIONS DESK", "", "Tab / Shift+Tab: next / previous view", "Menu shortcut: choose the letter shown on the left", "Up/Down or j/k: scroll; on Sites, select a property", "PageUp/PageDown, Home/End: scroll long evidence", "Enter on Sites: open property health, doctor and passport", "/ on Sites: filter by name, ID or domain; Esc clears the filter", "Space: reload the current view (Disk scans on demand)", "F5: collect fresh observations; repeated requests do not overlap", "Esc: back from property; clear site filter or cancel input", "l from property: runtime logs; a: site readiness; b: recovery", "x: dependency impact; / then enter a resource, e.g. caddy", "w on Incidents: export the newest listed incident capsule", "t in DEMO: simulate an application outage / recovery", "q or Ctrl+C: quit and restore the terminal", "", "The dashboard collects automatically every configured interval.", "The standalone collector is optional if this dashboard is running.", "No access token, browser or listening management port is used.", "Live reads use your existing SSH identity and known_hosts.", "Checks never restart, deploy, prune, remove files or reboot.", "DEMO is clearly labelled fictional data and makes no network calls.", "", "[+] passed  [!] failed  [~] warning  [?] unknown  [-] not applicable", "Layer order: runtime, local HTTP, proxy, DNS, TLS, public HTTP.", "UNKNOWN is missing evidence, not a zero measurement or a pass.", "Existing deployment workflows keep responsibility for deployment.", "Record evidence: hostops record deployment --file local/deploy.json"}
+		"AMADEUS HOSTOPS - TERMINAL OPERATIONS DESK", "",
+		"Tab / Shift+Tab: next / previous view",
+		"Menu shortcut: choose the letter shown on the left",
+		"Up/Down or j/k: scroll; on Sites, select a property",
+		"PageUp/PageDown, Home/End: scroll long evidence",
+		"Enter on Sites: open property health, doctor and passport",
+		"/ on Sites: filter by name, ID or domain; Esc clears the filter",
+		"Space: reload the current view (Disk scans on demand)",
+		"F5: request inventory refresh and public checks",
+		"z: inventory sources, routes, workloads and coverage gaps",
+		"Esc: back from property; clear site filter or cancel input",
+		"l from property: runtime logs; a: site readiness; b: recovery",
+		"x: dependency impact; / then enter a resource, e.g. caddy",
+		"w on Incidents: export the newest listed incident capsule",
+		"t in DEMO: simulate an application outage / recovery",
+		"q or Ctrl+C: quit and restore the terminal", "",
+		"Automatic mode: CPU/RAM 1s, workload metrics 5s, inventory/disk 30s.",
+		"Public HTTP uses --interval (default 30s); DNS/TLS use 5 minutes.",
+		"Sites come from proxy domains; JSON site entries are optional metadata.",
+		"The standalone collector is optional if this dashboard is running.",
+		"No access token, browser or listening management port is used.",
+		"SSH starts a bundled Linux collector in the remote user's private cache.",
+		"Checks never restart, deploy, prune, remove files or reboot.",
+		"DEMO is clearly labelled fictional data and makes no network calls.", "",
+		"[+] passed  [!] failed  [~] warning  [?] unknown  [-] not applicable",
+		"Layer order: runtime, local HTTP, proxy, DNS, TLS, public HTTP.",
+		"UNKNOWN is missing evidence, not a zero measurement or a pass.",
+		"Existing deployment workflows keep responsibility for deployment.",
+		"Record evidence: hostops record deployment --file local/deploy.json",
+	}
 }

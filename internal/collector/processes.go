@@ -43,8 +43,10 @@ func readProcesses(ctx context.Context, runner platform.Runner, snapshot *discov
 	result := []proxyProcess{}
 	byPID := map[int]discovery.Workload{}
 	containerPIDs := map[int]bool{}
+	existing := map[string]bool{}
 	for _, w := range snapshot.Workloads {
 		containerPIDs[w.PID] = true
+		existing[w.ID] = true
 	}
 	for _, entry := range entries {
 		pid, err := strconv.Atoi(entry.Name())
@@ -76,7 +78,7 @@ func readProcesses(ctx context.Context, runner platform.Runner, snapshot *discov
 			result = append(result, proxyProcess{kind: kind, binary: binary, args: args, workload: w})
 		}
 	}
-	seen := map[string]bool{}
+	seen := existing
 	data, err := runner.Run(ctx, "ss", "-H", "-lntup")
 	if err != nil {
 		snapshot.Sources = append(snapshot.Sources, discovery.Source{ID: "linux/listeners", ParentID: source.ID, Kind: "listeners", State: "unavailable", Mode: "active", Issue: "Listening socket inspection unavailable", ObservedAt: snapshot.ObservedAt})

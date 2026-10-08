@@ -10,7 +10,7 @@ import (
 )
 
 func safeAddress(raw string) string {
-	if u, err := url.Parse(raw); err == nil && u.Host != "" {
+	if u, err := url.Parse(raw); err == nil {
 		u.User = nil
 		u.RawQuery = ""
 		u.Fragment = ""
@@ -32,7 +32,10 @@ func TraefikRule(rule string) (hosts, paths []string, note string) {
 		paths = append(paths, match[1])
 	}
 	if len(hosts) == 0 {
-		hosts = []string{"~" + rule}
+		hosts = []string{"*"}
+		for _, match := range regexp.MustCompile("HostRegexp\\(\\s*[`\"']([^`\"']+)[`\"']\\s*\\)").FindAllStringSubmatch(rule, -1) {
+			hosts = []string{"~" + match[1]}
+		}
 		note = "Host pattern cannot enumerate individual domains"
 	}
 	if strings.Contains(rule, "&&") || strings.Contains(rule, "!") {

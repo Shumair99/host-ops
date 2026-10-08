@@ -32,7 +32,7 @@ func Disk(ctx context.Context, runner platform.Runner, h config.Host) DiskReport
 	r := DiskReport{HostID: h.ID, ObservedAt: time.Now().UTC(), Directories: []DiskEntry{}, Docker: []map[string]string{}, Unavailable: []string{}}
 	roots := h.DiskRoots
 	if len(roots) == 0 {
-		roots = []string{"/home/deploy/apps", "/var/lib/docker", "/var/log", "/tmp"}
+		roots = []string{"/"}
 	}
 	for _, root := range roots {
 		data, err := runner.Run(ctx, "du", "-x", "-B1", "--max-depth=1", "--", root)

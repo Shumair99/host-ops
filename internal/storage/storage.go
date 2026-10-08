@@ -164,7 +164,7 @@ func (s *Store) Query(ctx context.Context, host, site, kind string, since time.T
 }
 
 func (s *Store) Retain(ctx context.Context, age time.Duration) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM records WHERE kind IN ('health','external_health','metrics','host_metrics','snapshot') AND observed_at<? AND id NOT IN (SELECT max(id) FROM records GROUP BY host_id,site_id,kind)`, time.Now().Add(-age).UTC().Format(timestampLayout))
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM records WHERE kind IN ('health','external_health','metrics','host_metrics','snapshot','inventory') AND observed_at<? AND id NOT IN (SELECT max(id) FROM records GROUP BY host_id,site_id,kind)`, time.Now().Add(-age).UTC().Format(timestampLayout))
 	return err
 }
 

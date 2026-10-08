@@ -33,7 +33,7 @@ func ParseCaddy(data []byte, source, proxy string, networks []string) ([]Route, 
 		if len(hosts) == 0 {
 			hosts = []string{"*"}
 		}
-		r := Route{SourceID: source, ProxyID: proxy, Hosts: hosts, Paths: scope.paths, Kind: kind, Scheme: scope.scheme, Port: scope.port, Root: scope.root, Upstreams: upstreams, RedirectTo: redirect, Networks: networks, Note: scope.note}
+		r := Route{SourceID: source, ProxyID: proxy, Hosts: hosts, Paths: scope.paths, Kind: kind, Scheme: scope.scheme, Port: scope.port, Root: scope.root, Upstreams: upstreams, RedirectTo: safeAddress(redirect), Networks: networks, Note: scope.note}
 		key, _ := json.Marshal(r)
 		r.ID = StableID("route", string(key))
 		result = append(result, r)
@@ -57,7 +57,7 @@ func ParseCaddy(data []byte, source, proxy string, networks []string) ([]Route, 
 				for _, value := range array(h["upstreams"]) {
 					u, _ := value.(map[string]any)
 					if dial, ok := u["dial"].(string); ok {
-						upstreams = append(upstreams, dial)
+						upstreams = append(upstreams, safeAddress(dial))
 					}
 				}
 				if h["dynamic_upstreams"] != nil {

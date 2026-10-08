@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ type Discovery struct {
 func (c Config) Discovering() bool { return !c.Discovery.Disabled }
 
 type Host struct {
+	SSHPort           int         `json:"ssh_port,omitempty"`
 	ID                string      `json:"id"`
 	Name              string      `json:"name"`
 	SSH               string      `json:"ssh,omitempty"`
@@ -47,17 +49,18 @@ type CostWeights struct {
 }
 
 type Site struct {
-	Discovered bool     `json:"discovered,omitempty"`
-	ID         string   `json:"id"`
-	HostID     string   `json:"host_id"`
-	Name       string   `json:"name"`
-	Repository string   `json:"repository,omitempty"`
-	Branch     string   `json:"branch,omitempty"`
-	Runtime    Runtime  `json:"runtime"`
-	Proxy      Proxy    `json:"proxy"`
-	Health     Health   `json:"health"`
-	Business   Business `json:"business,omitempty"`
-	Recovery   Recovery `json:"recovery,omitempty"`
+	Dependencies []string `json:"dependencies,omitempty"`
+	Discovered   bool     `json:"discovered,omitempty"`
+	ID           string   `json:"id"`
+	HostID       string   `json:"host_id"`
+	Name         string   `json:"name"`
+	Repository   string   `json:"repository,omitempty"`
+	Branch       string   `json:"branch,omitempty"`
+	Runtime      Runtime  `json:"runtime"`
+	Proxy        Proxy    `json:"proxy"`
+	Health       Health   `json:"health"`
+	Business     Business `json:"business,omitempty"`
+	Recovery     Recovery `json:"recovery,omitempty"`
 }
 
 type Runtime struct {
@@ -122,8 +125,11 @@ func (c *Config) Validate() error {
 	if !identifier.MatchString(c.Host.ID) {
 		return fmt.Errorf("host.id must be an identifier")
 	}
-	if c.Host.SSH != "" && !sshTarget.MatchString(c.Host.SSH) {
+	if c.Host.SSH != "" && !validSSH(c.Host.SSH) {
 		return fmt.Errorf("host.ssh must be a host or user@host, without options")
+	}
+	if c.Host.SSHPort < 0 || c.Host.SSHPort > 65535 {
+		return fmt.Errorf("SSH port must be 1..65535, or zero for the SSH default")
 	}
 	if c.Host.CaddyContainer != "" && !identifier.MatchString(c.Host.CaddyContainer) {
 		return fmt.Errorf("invalid Caddy container")
@@ -238,6 +244,21 @@ func (c *Config) Validate() error {
 }
 
 func (s Site) Timeout() time.Duration { return time.Duration(s.Health.TimeoutSeconds) * time.Second }
+
+func validSSH(target string) bool {
+	if sshTarget.MatchString(target) {
+		return true
+	}
+	parts := strings.Split(target, "@")
+	if len(parts) > 2 {
+		return false
+	}
+	host := parts[len(parts)-1]
+	if len(parts) == 2 && !identifier.MatchString(parts[0]) {
+		return false
+	}
+	return net.ParseIP(strings.Trim(host, "[]")) != nil
+}
 
 func (c Config) Select(id string) ([]Site, error) {
 	if id == "" {

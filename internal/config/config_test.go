@@ -23,3 +23,20 @@ func TestUnsafeManifestIsRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestConnectionOnlyConfigurationAndSSHPorts(t *testing.T) {
+	for _, target := range []string{"vps-alias", "ops@example.com", "ops@2001:db8::1", "ops@[2001:db8::1]"} {
+		c := Config{Host: Host{ID: "h", SSH: target, SSHPort: 2222}}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("valid connection rejected: %s: %v", target, err)
+		}
+	}
+	for _, port := range []int{-1, 65536} {
+		if err := (&Config{Host: Host{ID: "h", SSHPort: port}}).Validate(); err == nil {
+			t.Fatal("invalid port accepted")
+		}
+	}
+	if err := (&Config{Host: Host{ID: "h"}, Discovery: Discovery{Disabled: true}}).Validate(); err == nil {
+		t.Fatal("manual mode accepted no sites")
+	}
+}

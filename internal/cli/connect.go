@@ -21,6 +21,7 @@ func connect(ctx context.Context, args []string, out, errOut io.Writer) int {
 	flags.SetOutput(errOut)
 	file := flags.String("config", "local/hostops.json", "connection settings")
 	identity := flags.String("identity", "", "existing SSH private key file")
+	port := flags.Int("port", 0, "SSH port; zero uses SSH configuration")
 	collector := flags.String("collector", "", "Linux collector from the release bundle")
 	db := flags.String("db", "local/hostops.db", "inventory database")
 	target := ""
@@ -42,9 +43,13 @@ func connect(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	c := config.Config{Host: config.Host{ID: discovery.StableID("host", target), Name: target, SSH: target, IdentityFile: *identity}, Discovery: config.Discovery{CollectorFile: *collector}}
+	c.Host.SSHPort = *port
 	if old, err := config.Load(*file); err == nil && old.Host.SSH == target {
 		c = old
 		c.Discovery.Disabled = false
+		if *port != 0 {
+			c.Host.SSHPort = *port
+		}
 		if *identity != "" {
 			c.Host.IdentityFile = *identity
 		}

@@ -22,13 +22,35 @@ func ConfigSites(registry Registry, base config.Config) config.Config {
 	for _, w := range registry.Snapshot.Workloads {
 		workloads[w.ID] = w
 	}
+	sources := map[string]Source{}
+	for _, source := range registry.Snapshot.Sources {
+		sources[source.ID] = source
+	}
 	out := []config.Site{}
 	for _, item := range registry.Sites {
 		if item.State == "removed" {
 			continue
 		}
 		s := config.Site{ID: item.ID, HostID: base.Host.ID, Name: item.Domain, Discovered: true, Runtime: config.Runtime{Type: "unresolved"}, Proxy: config.Proxy{Domain: item.Domain}, Health: config.Health{Path: "/", TimeoutSeconds: 5, Automatic: true}}
+		dependencies := map[string]bool{}
+		addWorkload := func(id string) {
+			if w, ok := workloads[id]; ok {
+				for _, key := range []string{w.ID, w.Type, w.Name, w.ProxyKind} {
+					if key != "" {
+						dependencies[key] = true
+					}
+				}
+			}
+		}
+		for _, id := range item.WorkloadIDs {
+			addWorkload(id)
+		}
 		for _, route := range item.Routes {
+			addWorkload(route.ProxyID)
+			dependencies[route.SourceID] = true
+			if kind := sources[route.SourceID].Kind; kind != "" {
+				dependencies[kind] = true
+			}
 			if route.Scheme == "https" || s.Health.PublicURL == "" {
 				u := url.URL{Scheme: route.Scheme, Host: item.Domain, Path: "/"}
 				if route.Port != "" && route.Port != "80" && route.Port != "443" {
@@ -70,6 +92,10 @@ func ConfigSites(registry Registry, base config.Config) config.Config {
 			s.Health = old.Health
 			delete(manual, item.Domain)
 		}
+		for key := range dependencies {
+			s.Dependencies = append(s.Dependencies, key)
+		}
+		sort.Strings(s.Dependencies)
 		out = append(out, s)
 	}
 	if !base.Discovering() {

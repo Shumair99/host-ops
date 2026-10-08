@@ -105,7 +105,7 @@ func (m dashboard) spark(key string, width, color int) []string {
 	if len(samples) < 2 {
 		return []string{m.theme.paint("Awaiting history", muted), ""}
 	}
-	buckets := timeBuckets(samples, key, width)
+	buckets, gaps := relativeBuckets(samples, key, width)
 	peak := 0.0
 	count := 0
 	for _, v := range buckets {
@@ -119,9 +119,93 @@ func (m dashboard) spark(key string, width, color int) []string {
 	}
 	rows := barPlot(buckets, 2, peak)
 	for i := range rows {
+		// A half block is a clear, font-safe base level for measured zero use.
+		rows[i] = strings.ReplaceAll(rows[i], "_", "▄")
+		if i == 0 || i == len(rows)-1 {
+			line := []rune(rows[i])
+			for x, gap := range gaps {
+				if gap {
+					line[x] = '|'
+				}
+			}
+			rows[i] = string(line)
+		}
 		rows[i] = m.theme.paint(rows[i], color)
 	}
 	return rows
+}
+
+// relativeBuckets keeps Overview cards focused on the sequence of recent
+// samples. Long collection outages get one visible separator instead of
+// consuming most of a short sparkline. Host history retains actual time scale.
+func relativeBuckets(samples []metrics.Sample, key string, width int) ([]*float64, []bool) {
+	width = max(1, width)
+	buckets, gaps := make([]*float64, width), make([]bool, width)
+	if len(samples) == 0 {
+		return buckets, gaps
+	}
+	deltas := make([]time.Duration, 0, len(samples)-1)
+	for i := 1; i < len(samples); i++ {
+		if d := samples[i].ObservedAt.Sub(samples[i-1].ObservedAt); d > 0 {
+			deltas = append(deltas, d)
+		}
+	}
+	threshold := 45 * time.Second
+	if len(deltas) > 0 {
+		sort.Slice(deltas, func(i, j int) bool { return deltas[i] < deltas[j] })
+		threshold = max(threshold, 3*deltas[len(deltas)/2])
+	}
+	type segment struct{ start, end int }
+	segments := []segment{}
+	start := 0
+	for i := 1; i < len(samples); i++ {
+		if samples[i].ObservedAt.Sub(samples[i-1].ObservedAt) > threshold {
+			segments = append(segments, segment{start, i})
+			start = i
+		}
+	}
+	segments = append(segments, segment{start, len(samples)})
+	if len(segments) > width {
+		segments = []segment{{0, len(samples)}}
+	}
+	gapColumns := min(len(segments)-1, width-len(segments))
+	dataColumns := width - gapColumns
+	widths := make([]int, len(segments))
+	remainingColumns := dataColumns
+	remainingSamples := len(samples)
+	for i, s := range segments {
+		remainingSegments := len(segments) - i - 1
+		segmentSamples := s.end - s.start
+		segmentWidth := remainingColumns
+		if remainingSegments > 0 {
+			segmentWidth = int(math.Round(float64(remainingColumns) * float64(segmentSamples) / float64(remainingSamples)))
+			segmentWidth = max(1, min(segmentWidth, remainingColumns-remainingSegments))
+		}
+		widths[i] = segmentWidth
+		remainingColumns -= segmentWidth
+		remainingSamples -= segmentSamples
+	}
+
+	cursor := 0
+	for i, s := range segments {
+		segmentWidth := widths[i]
+		for j := s.start; j < s.end; j++ {
+			x := cursor
+			if s.end-s.start > 1 && segmentWidth > 1 {
+				x += int(math.Round(float64(j-s.start) / float64(s.end-s.start-1) * float64(segmentWidth-1)))
+			}
+			n := value(samples[j].Values, key)
+			if n != nil && (buckets[x] == nil || *n > *buckets[x]) {
+				buckets[x] = n
+			}
+		}
+		cursor += segmentWidth
+		if i < len(segments)-1 && cursor < width {
+			gaps[cursor] = true
+			cursor++
+		}
+	}
+	return buckets, gaps
 }
 
 // Full and half blocks are supported by Consolas, Lucida Console and Cascadia

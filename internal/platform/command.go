@@ -35,6 +35,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 }
 
 func (r Command) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	includeStderr := name == "docker" && len(args) > 0 && args[0] == "logs"
 	if r.Host.SSH != "" {
 		parts := []string{Quote(name)}
 		for _, arg := range args {
@@ -57,7 +58,10 @@ func (r Command) Run(ctx context.Context, name string, args ...string) ([]byte, 
 		}
 		return nil, fmt.Errorf("inspection command failed (%s)", err)
 	}
-	if stdout.overflow {
+	if includeStderr {
+		stdout.Write(stderr.data)
+	}
+	if stdout.overflow || (includeStderr && stderr.overflow) {
 		return nil, fmt.Errorf("inspection output exceeded 4 MiB")
 	}
 	return stdout.data, nil

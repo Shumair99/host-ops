@@ -9,6 +9,7 @@ import (
 
 	"github.com/Shumair99/host-ops/api"
 	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/events"
 	"github.com/Shumair99/host-ops/internal/health"
 	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/model"
@@ -18,6 +19,10 @@ import (
 
 func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
 	reports := make([]model.Report, 0, len(c.Sites))
+	previous, err := store.Latest(ctx, c.Host.ID)
+	if err != nil {
+		return err
+	}
 	runner := platform.Command{Host: c.Host}
 	for _, site := range c.Sites {
 		if ctx.Err() != nil {
@@ -26,6 +31,9 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
 		reports = append(reports, health.Collect(ctx, c, site, runner))
 	}
 	if err := store.Reports(ctx, c.Host.ID, reports); err != nil {
+		return err
+	}
+	if err := events.Record(ctx, store, previous, reports); err != nil {
 		return err
 	}
 	metricsCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

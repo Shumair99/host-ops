@@ -48,7 +48,8 @@ func Open(path string) (*Store, error) {
 	_, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
 CREATE TABLE IF NOT EXISTS records (id INTEGER PRIMARY KEY, host_id TEXT NOT NULL, site_id TEXT NOT NULL, kind TEXT NOT NULL, observed_at TEXT NOT NULL, data TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS records_lookup ON records(host_id,kind,site_id,id DESC);
-CREATE INDEX IF NOT EXISTS records_time ON records(observed_at); PRAGMA user_version=1;`)
+CREATE INDEX IF NOT EXISTS records_time ON records(observed_at);
+CREATE TABLE IF NOT EXISTS dedup (host_id TEXT NOT NULL, kind TEXT NOT NULL, event_key TEXT NOT NULL, PRIMARY KEY(host_id,kind,event_key)); PRAGMA user_version=1;`)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -144,4 +145,28 @@ func (s *Store) Query(ctx context.Context, host, site, kind string, since time.T
 func (s *Store) Retain(ctx context.Context, age time.Duration) error {
 	_, err := s.DB.ExecContext(ctx, `DELETE FROM records WHERE kind IN ('health','metrics','host_metrics','snapshot') AND observed_at<? AND id NOT IN (SELECT max(id) FROM records GROUP BY host_id,site_id,kind)`, time.Now().Add(-age).UTC().Format(timestampLayout))
 	return err
+}
+
+func (s *Store) AddOnce(ctx context.Context, host, site, kind, key string, at time.Time, value any) (bool, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return false, err
+	}
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO dedup(host_id,kind,event_key) VALUES(?,?,?)", host, kind, key)
+	if err != nil {
+		return false, err
+	}
+	count, _ := result.RowsAffected()
+	if count == 0 {
+		return false, nil
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES(?,?,?,?,?)", host, site, kind, at.UTC().Format(timestampLayout), string(data)); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }

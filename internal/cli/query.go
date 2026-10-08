@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/logs"
 	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/platform"
 	"github.com/Shumair99/host-ops/internal/storage"
@@ -17,6 +18,20 @@ import (
 func query(ctx context.Context, c config.Config, command, id, db, since string, out, errOut io.Writer) int {
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
+	if command == "logs" {
+		if id == "" {
+			fmt.Fprintln(errOut, "logs requires a site")
+			return 1
+		}
+		sites, _ := c.Select(id)
+		text, err := logs.Read(ctx, platform.Command{Host: c.Host}, sites[0])
+		if err != nil {
+			fmt.Fprintln(errOut, "Log stream unavailable")
+			return 1
+		}
+		fmt.Fprintln(out, text)
+		return 0
+	}
 	if command == "disk" {
 		encoder.Encode(metrics.Disk(ctx, platform.Command{Host: c.Host}, c.Host))
 		return 0
@@ -48,7 +63,14 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 		return 1
 	}
 	defer store.Close()
-	records, err := store.Query(ctx, c.Host.ID, id, "health", time.Now().Add(-duration), 1000)
+	kind := "health"
+	if command == "events" {
+		kind = "event"
+	}
+	if command == "deployments" {
+		kind = "deployment"
+	}
+	records, err := store.Query(ctx, c.Host.ID, id, kind, time.Now().Add(-duration), 1000)
 	if err != nil {
 		fmt.Fprintln(errOut, "History query failed")
 		return 1

@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -10,7 +11,10 @@ import (
 	"time"
 
 	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/deployments"
+	"github.com/Shumair99/host-ops/internal/logs"
 	"github.com/Shumair99/host-ops/internal/model"
+	"github.com/Shumair99/host-ops/internal/platform"
 	"github.com/Shumair99/host-ops/internal/storage"
 )
 
@@ -64,6 +68,22 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		JSON(w, 200, records[0].Data)
+	})
+	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "event") })
+	mux.HandleFunc("GET /api/deployments", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "deployment") })
+	mux.HandleFunc("POST /api/deployments", s.deployment)
+	mux.HandleFunc("GET /api/sites/{site}/logs", func(w http.ResponseWriter, r *http.Request) {
+		sites, err := s.Config.Select(r.PathValue("site"))
+		if err != nil {
+			Error(w, 404, "Site not registered")
+			return
+		}
+		text, err := logs.Read(r.Context(), platform.Command{Host: s.Config.Host}, sites[0])
+		if err != nil {
+			Error(w, 502, "Log stream unavailable")
+			return
+		}
+		JSON(w, 200, map[string]string{"host_id": s.Config.Host.ID, "site_id": sites[0].ID, "text": text})
 	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -143,4 +163,44 @@ func (s *Server) records(w http.ResponseWriter, r *http.Request, kind string) {
 		return
 	}
 	JSON(w, 200, records)
+}
+
+func (s *Server) deployment(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var d deployments.Deployment
+	if err := decoder.Decode(&d); err != nil {
+		Error(w, 400, "Invalid deployment JSON")
+		return
+	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		Error(w, 400, "Expected one JSON object")
+		return
+	}
+	if _, err := s.Config.Select(d.SiteID); err != nil {
+		Error(w, 400, "Site not registered")
+		return
+	}
+	if d.HealthResult == "" {
+		d.HealthResult = "unknown"
+	}
+	if err := d.Validate(); err != nil {
+		Error(w, 400, err.Error())
+		return
+	}
+	d.HostID = s.Config.Host.ID
+	d.Origin = "deployment_notification"
+	d.ObservedAt = time.Now().UTC()
+	created, err := s.Store.AddOnce(r.Context(), d.HostID, d.SiteID, "deployment", d.SiteID+":"+d.ID+":"+d.Status, d.ObservedAt, d)
+	if err != nil {
+		Error(w, 500, "Deployment history unavailable")
+		return
+	}
+	status := 200
+	if created {
+		status = 201
+	}
+	JSON(w, status, d)
 }

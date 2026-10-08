@@ -16,13 +16,4 @@ try {
         & $goExe build -trimpath -o "bin/$program.exe" "./cmd/$program"
         if ($LASTEXITCODE) { throw "Build failed: $program" }
     }
-    Push-Location web
-    try {
-        if (-not (Test-Path -LiteralPath node_modules)) {
-            npm ci
-            if ($LASTEXITCODE) { throw 'npm ci failed.' }
-        }
-        npm run build
-        if ($LASTEXITCODE) { throw 'Dashboard build failed.' }
-    } finally { Pop-Location }
 } finally { Pop-Location }

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
@@ -11,9 +12,12 @@ import (
 	"text/tabwriter"
 
 	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/console"
+	"github.com/Shumair99/host-ops/internal/evidence"
 	"github.com/Shumair99/host-ops/internal/health"
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
+	"github.com/Shumair99/host-ops/internal/storage"
 )
 
 const Help = `Amadeus HostOps — read-only production website operations
@@ -22,6 +26,7 @@ Usage: hostops <command> [site] [options]
 
 Commands:
   sites             List registered production properties
+  record <kind>     Import deployment/backup/restore/observations (--file FILE)
   status [site]     Inspect runtime health
   doctor [site]     Explain cross-layer observations with evidence
   metrics [site]    Collect current host or container metrics
@@ -47,16 +52,23 @@ Options:
   --config FILE     Manifest (default: HOSTOPS_CONFIG or hostops.json)
   --json            Machine-readable output
 
+  --db FILE         Local SQLite history (default local/hostops.db)
+  --since DURATION  Historical query window (default 24h)
+  --file FILE       Evidence JSON; use - for standard input
+
 Exit codes: 0 healthy/list, 1 usage/configuration error, 2 unhealthy or unknown.
 `
 
 func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
+	return RunWithInput(ctx, args, os.Stdin, out, errOut)
+}
+func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errOut io.Writer) int {
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
 		fmt.Fprint(out, Help)
 		return 0
 	}
 	command := args[0]
-	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" && command != "security" && command != "orphans" && command != "ownership" && command != "costs" && command != "capacity" && command != "recovery" && command != "impact" && command != "preflight" && command != "capsule" {
+	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" && command != "security" && command != "orphans" && command != "ownership" && command != "costs" && command != "capacity" && command != "recovery" && command != "impact" && command != "preflight" && command != "capsule" && command != "record" {
 		fmt.Fprintf(errOut, "unknown command %q\n", command)
 		return 1
 	}
@@ -70,6 +82,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	asJSON := flags.Bool("json", false, "JSON output")
 	db := flags.String("db", "local/hostops.db", "history database")
 	since := flags.String("since", "24h", "history window")
+	file := flags.String("file", "", "evidence input file")
 	id := ""
 	flagArgs := append([]string(nil), args[1:]...)
 	if len(flagArgs) > 0 && !strings.HasPrefix(flagArgs[0], "-") {
@@ -92,7 +105,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	selectionID := id
-	if command == "ownership" || command == "impact" || command == "preflight" || command == "capsule" {
+	if command == "ownership" || command == "impact" || command == "preflight" || command == "capsule" || command == "record" {
 		selectionID = ""
 	}
 	sites, err := c.Select(selectionID)
@@ -102,8 +115,48 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
+	if command == "record" {
+		if *file == "" {
+			fmt.Fprintln(errOut, "record requires --file FILE (or --file - for stdin)")
+			return 1
+		}
+		if *file != "-" {
+			f, err := os.Open(*file)
+			if err != nil {
+				fmt.Fprintln(errOut, "Evidence input unavailable")
+				return 1
+			}
+			defer f.Close()
+			input = f
+		}
+		store, err := storage.Open(*db)
+		if err != nil {
+			fmt.Fprintln(errOut, "Evidence database unavailable")
+			return 1
+		}
+		defer store.Close()
+		count, err := evidence.Record(ctx, c, store, id, input)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		if *asJSON {
+			encoder.Encode(map[string]any{"accepted": count, "kind": id})
+		} else {
+			fmt.Fprintf(out, "%d new %s record(s) accepted. Repeated records are ignored.\n", count, id)
+		}
+		return 0
+	}
 	if command == "metrics" || command == "history" || command == "disk" || command == "events" || command == "deployments" || command == "logs" || command == "diff" || command == "incidents" || command == "readiness" || command == "security" || command == "orphans" || command == "ownership" || command == "costs" || command == "capacity" || command == "recovery" || command == "impact" || command == "preflight" || command == "capsule" {
-		return query(ctx, c, command, id, *db, *since, out, errOut)
+		if *asJSON || command == "logs" || command == "capsule" {
+			return query(ctx, c, command, id, *db, *since, out, errOut)
+		}
+		var data bytes.Buffer
+		code := query(ctx, c, command, id, *db, *since, &data, errOut)
+		if data.Len() > 0 {
+			fmt.Fprintln(out, strings.Join(console.FormatJSON(command, data.Bytes()), "\n"))
+		}
+		return code
 	}
 	if command == "sites" {
 		if *asJSON {

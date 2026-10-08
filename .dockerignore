@@ -2,7 +2,5 @@
 .tools
 local
 bin
-web/node_modules
-web/dist
 .env*
 *.db*

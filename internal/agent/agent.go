@@ -4,11 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"sync"
 	"time"
 
-	"github.com/Shumair99/host-ops/api"
 	"github.com/Shumair99/host-ops/internal/changes"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/diagnostics"
@@ -89,48 +87,23 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
 	return store.Retain(ctx, 90*24*time.Hour)
 }
 
-func Run(ctx context.Context, c config.Config, store *storage.Store, address, token, webDir string, interval time.Duration, allowPrivate bool) error {
-	if !api.Loopback(address) && !allowPrivate {
-		return fmt.Errorf("management API must bind to an explicit loopback IP; use SSH tunnelling")
-	}
-	if len(token) < 32 {
-		return fmt.Errorf("HOSTOPS_TOKEN must contain at least 32 characters")
-	}
+func Run(ctx context.Context, c config.Config, store *storage.Store, interval time.Duration) error {
 	if interval < 5*time.Second {
 		return fmt.Errorf("collection interval must be at least 5s")
 	}
-	server := &http.Server{Addr: address, Handler: (&api.Server{Config: c, Store: store, Token: token, MaxAge: interval * 3, WebDir: webDir}).Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 * 1024}
-	errors := make(chan error, 1)
-	go func() { errors <- server.ListenAndServe() }()
-	collectionCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	collectorDone := make(chan struct{})
-	go func() {
-		defer close(collectorDone)
-		for {
-			if err := Cycle(collectionCtx, c, store); err != nil && collectionCtx.Err() == nil {
-				log.Printf("collection failed for host %s", c.Host.ID)
-			}
-			timer := time.NewTimer(interval)
-			select {
-			case <-collectionCtx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-			}
+	for {
+		if ctx.Err() != nil {
+			return nil
 		}
-	}()
-	select {
-	case <-ctx.Done():
-	case err := <-errors:
-		cancel()
-		<-collectorDone
-		return err
+		if err := Cycle(ctx, c, store); err != nil && ctx.Err() == nil {
+			log.Printf("collection failed for host %s", c.Host.ID)
+		}
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
 	}
-	cancel()
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-	err := server.Shutdown(shutdownCtx)
-	<-collectorDone
-	return err
 }

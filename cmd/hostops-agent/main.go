@@ -16,11 +16,8 @@ import (
 func main() {
 	manifest := flag.String("config", "hostops.json", "site manifest")
 	db := flag.String("db", "local/hostops.db", "SQLite history")
-	listen := flag.String("listen", "127.0.0.1:9090", "private management API")
 	interval := flag.Duration("interval", 30*time.Second, "collection interval")
-	once := flag.Bool("once", false, "collect once without serving API")
-	webDir := flag.String("web", "web/dist", "built dashboard directory")
-	allowPrivate := flag.Bool("allow-private-listen", false, "explicitly permit a container/private listener; keep the published port loopback-only")
+	once := flag.Bool("once", false, "collect once and exit")
 	flag.Parse()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -36,7 +33,8 @@ func main() {
 	if *once {
 		err = agent.Cycle(ctx, c, store)
 	} else {
-		err = agent.Run(ctx, c, store, *listen, os.Getenv("HOSTOPS_TOKEN"), *webDir, *interval, *allowPrivate)
+		log.Printf("headless collection for %s; Ctrl+C stops collection", c.Host.ID)
+		err = agent.Run(ctx, c, store, *interval)
 	}
 	if err != nil {
 		log.Fatal(err)

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/Shumair99/host-ops/internal/config"
@@ -21,7 +22,7 @@ func main() {
 	failures := flag.Int("failures", 3, "consecutive failures to open incident")
 	recoveries := flag.Int("recoveries", 2, "consecutive healthy checks to resolve")
 	once := flag.Bool("once", false, "one collection cycle")
-	endpoint := flag.String("api", "", "optional private agent/tunnel URL")
+	export := flag.String("export", "", "optional latest observation JSON file for CLI import")
 	flag.Parse()
 	if *interval < 5*time.Second || *failures < 1 || *recoveries < 1 {
 		log.Fatal("interval >=5s and thresholds >=1 are required")
@@ -42,9 +43,16 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if *endpoint != "" {
-			if err = watcher.Publish(ctx, *endpoint, os.Getenv("HOSTOPS_TOKEN"), reports); err != nil {
-				log.Print(err)
+		if *export != "" {
+			data, err := json.MarshalIndent(reports, "", "  ")
+			if err != nil {
+				log.Fatal(err)
+			}
+			if err = os.MkdirAll(filepath.Dir(*export), 0700); err != nil {
+				log.Fatal(err)
+			}
+			if err = os.WriteFile(*export, append(data, '\n'), 0600); err != nil {
+				log.Fatal("observation export unavailable")
 			}
 		}
 		if *once {

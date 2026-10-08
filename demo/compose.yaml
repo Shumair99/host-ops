@@ -4,10 +4,7 @@ services:
     build:
       context: ..
     container_name: demo-hostops
-    command: ["--config", "/etc/hostops/sites.json", "--db", "/var/lib/hostops/history.db", "--web", "/opt/hostops/web", "--listen", "0.0.0.0:9090", "--allow-private-listen", "--interval", "10s"]
-    environment:
-      HOSTOPS_TOKEN: ${HOSTOPS_TOKEN:?Set a random HOSTOPS_TOKEN with at least 32 characters}
-    ports: ["127.0.0.1:9090:9090"]
+    command: ["--config", "/etc/hostops/sites.json", "--db", "/var/lib/hostops/history.db", "--interval", "10s"]
     volumes:
       - ./sites.json:/etc/hostops/sites.json:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

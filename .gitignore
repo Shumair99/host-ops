@@ -8,8 +8,5 @@ local/
 *.db-wal
 *.exe
 coverage.out
-web/node_modules/
-web/dist/
-*.tsbuildinfo
 output/
 .playwright-cli/

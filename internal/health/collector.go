@@ -13,7 +13,7 @@ import (
 func Collect(ctx context.Context, c config.Config, s config.Site, runner platform.Runner) model.Report {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	r, checks := runtimecheck.InspectDocker(ctx, runner, s)
+	r, checks := runtimecheck.For(s.Runtime.Type).Inspect(ctx, runner, s)
 	vantage := "host-local"
 	if c.Host.SSH != "" {
 		vantage = "remote-host over SSH"

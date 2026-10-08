@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -125,11 +127,29 @@ func (c *Config) Validate() error {
 		if s.Name == "" {
 			return fmt.Errorf("site %s requires a name", s.ID)
 		}
-		if s.Runtime.Type != "docker" {
-			return fmt.Errorf("site %s: this phase supports Docker runtime only", s.ID)
-		}
-		if !identifier.MatchString(s.Runtime.Container) {
-			return fmt.Errorf("site %s: invalid container", s.ID)
+		switch s.Runtime.Type {
+		case "docker":
+			if !identifier.MatchString(s.Runtime.Container) {
+				return fmt.Errorf("site %s: invalid container", s.ID)
+			}
+			if s.Runtime.Port < 0 || s.Runtime.Port > 65535 {
+				return fmt.Errorf("site %s: invalid runtime port", s.ID)
+			}
+		case "static":
+			if !strings.HasPrefix(s.Runtime.Directory, "/") {
+				return fmt.Errorf("site %s: static directory must be absolute", s.ID)
+			}
+			for _, name := range s.Runtime.ExpectedFiles {
+				if name == "" || filepath.IsAbs(name) || strings.Contains(name, "\\") || strings.Contains(name, "..") || strings.HasPrefix(name, "/") {
+					return fmt.Errorf("site %s: expected_files must be relative paths without traversal", s.ID)
+				}
+			}
+		case "systemd":
+			if !identifier.MatchString(s.Runtime.Unit) {
+				return fmt.Errorf("site %s: invalid systemd unit", s.ID)
+			}
+		default:
+			return fmt.Errorf("site %s: unsupported runtime %q", s.ID, s.Runtime.Type)
 		}
 		if s.Health.ExpectedStatus == 0 {
 			s.Health.ExpectedStatus = 200

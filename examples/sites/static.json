@@ -1,0 +1,9 @@
+{
+  "host": { "id": "demo-host", "name": "Demo VPS", "caddy_admin_url": "http://127.0.0.1:2019" },
+  "sites": [{
+    "id": "static-demo", "host_id": "demo-host", "name": "Static demo",
+    "runtime": { "type": "static", "directory": "/srv/client-a", "expected_files": ["index.html"] },
+    "proxy": { "domain": "client-a.example.com" },
+    "health": { "public_url": "https://client-a.example.com/", "path": "/", "expected_status": 200 }
+  }]
+}

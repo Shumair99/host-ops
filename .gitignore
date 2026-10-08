@@ -1,0 +1,13 @@
+.tools/
+bin/
+local/
+.env
+.env.*
+*.db
+*.db-shm
+*.db-wal
+*.exe
+coverage.out
+web/node_modules/
+web/dist/
+*.tsbuildinfo

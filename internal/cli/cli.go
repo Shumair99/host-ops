@@ -31,7 +31,7 @@ Usage: hostops <command> [site] [options]
 Commands:
   connect TARGET    Save an SSH connection and discover sites automatically
   discover          Refresh and explain the automatic inventory
-  dashboard         Open the interactive ASCII operations desk (default)
+  dashboard         Open the terminal monitoring dashboard (default)
   sites             Refresh and list automatically discovered sites
   record <kind>     Import deployment/backup/restore/observations (--file FILE)
   status [site]     Inspect runtime health
@@ -68,6 +68,7 @@ Options:
   --no-collect      Disable automatic cycles; inspection views still read live
   --interval VALUE  Public HTTP interval (default 30s; CPU/RAM stream every 1s)
   --page VIEW       Initial dashboard view, e.g. disk or readiness
+  --color MODE      auto (default), always, or never; NO_COLOR is respected
 
 Exit codes: 0 healthy/list, 1 usage/configuration error, 2 unhealthy or unknown.
 `
@@ -125,6 +126,7 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	noCollect := flags.Bool("no-collect", false, "history only")
 	interval := flags.Duration("interval", 30*time.Second, "public HTTP check interval")
 	page := flags.String("page", "overview", "initial dashboard view")
+	color := flags.String("color", "auto", "terminal color: auto, always, never")
 	id := ""
 	flagArgs := append([]string(nil), args[1:]...)
 	if len(flagArgs) > 0 && !strings.HasPrefix(flagArgs[0], "-") {
@@ -155,7 +157,7 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 				return 1
 			}
 		}
-		err = tui.Run(ctx, c, *db, tui.Options{Interval: *interval, Demo: *demo, Once: *once, NoCollect: *noCollect, Page: *page}, input, out)
+		err = tui.Run(ctx, c, *db, tui.Options{Interval: *interval, Demo: *demo, Once: *once, NoCollect: *noCollect, Page: *page, Color: *color}, input, out)
 		if err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1

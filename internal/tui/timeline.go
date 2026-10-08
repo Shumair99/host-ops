@@ -23,14 +23,14 @@ func timelineLines(page string, records []storage.Record) []string {
 	if page == "monitoring" {
 		title = "HEALTH HISTORY: INDEPENDENT DOMAIN OBSERVATIONS"
 	}
-	lines := []string{title, "Latest 100 records in the last 24 hours.", ""}
+	lines := []string{title, "24h / latest 100 records", ""}
 	if len(records) == 0 {
 		message := map[string]string{
-			"events":      "No recorded health transitions, infrastructure changes or deployments in this window.",
-			"changes":     "No recorded infrastructure changes in this window.",
-			"deployments": "No deployment records. Import pipeline evidence with hostops record deployment.",
-			"external":    "No independent watcher records. Run a separate watcher and import its evidence.",
-			"monitoring":  "No health history in this window. Start the collector to record observations.",
+			"events":      "No recorded activity",
+			"changes":     "No infrastructure changes",
+			"deployments": "No deployment records",
+			"external":    "No watcher observations",
+			"monitoring":  "No health observations",
 		}[page]
 		return append(lines, message)
 	}
@@ -45,7 +45,7 @@ func timelineLines(page string, records []storage.Record) []string {
 				if report.Name != "" {
 					label = report.Name
 				}
-				lines = append(lines, fmt.Sprintf("%s  %s [%s]  %s", console.At(record.ObservedAt), console.Safe(label), strings.ToUpper(report.Overall), chain(report)))
+				lines = append(lines, fmt.Sprintf("%s  %s [%s]", record.ObservedAt.Local().Format("02 Jan 15:04:05"), console.Safe(label), strings.ToUpper(report.Overall)))
 				continue
 			}
 		}
@@ -58,7 +58,7 @@ func timelineLines(page string, records []storage.Record) []string {
 		if record.Kind == "deployment" {
 			summary = "Deployment: " + textField(data, "status") + "  revision: " + textField(data, "commit") + "  health: " + textField(data, "health_result")
 		}
-		lines = append(lines, fmt.Sprintf("%s  %s / %s", console.At(record.ObservedAt), console.Safe(label), record.Kind), "  "+console.Safe(summary))
+		lines = append(lines, fmt.Sprintf("%s  %s / %s", record.ObservedAt.Local().Format("02 Jan 15:04:05"), console.Safe(label), record.Kind), "  "+console.Safe(summary))
 		if before, ok := data["before"].(string); ok {
 			lines = append(lines, "  "+console.Safe(before)+" -> "+textField(data, "after"))
 		}

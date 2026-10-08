@@ -10,6 +10,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/preflight"
 	"github.com/Shumair99/host-ops/internal/security"
 	"github.com/Shumair99/host-ops/internal/storage"
+	"math"
 	"time"
 )
 
@@ -48,7 +49,22 @@ func SeedDemo(ctx context.Context, c config.Config, store *storage.Store, outage
 	if err := store.Reports(ctx, c.Host.ID, reports); err != nil {
 		return err
 	}
-	host := metrics.Sample{HostID: c.Host.ID, ObservedAt: now, Values: map[string]float64{"cpu_percent": 12.5, "memory_percent": 37.2, "disk_percent": 88, "disk_total_bytes": 40e9, "disk_used_bytes": 33e9, "disk_free_bytes": 4.5e9, "memory_total_bytes": 4e9, "memory_used_bytes": 1.488e9, "uptime_seconds": 12 * 86400}, Unavailable: []string{}}
+	host := metrics.Sample{HostID: c.Host.ID, ObservedAt: now, Values: map[string]float64{"cpu_percent": 12.5, "memory_percent": 37.2, "disk_percent": 88, "disk_total_bytes": 40e9, "disk_used_bytes": 35.2e9, "disk_free_bytes": 4.5e9, "memory_total_bytes": 4e9, "memory_used_bytes": 1.488e9, "uptime_seconds": 12 * 86400}, Unavailable: []string{}}
+	previous, err := store.Query(ctx, c.Host.ID, "", "host_metrics", time.Time{}, 1)
+	if err != nil {
+		return err
+	}
+	if len(previous) == 0 {
+		// Fictional history exists only in the explicitly labelled offline demo.
+		for i := 0; i < 60; i++ {
+			sample := host
+			sample.ObservedAt = now.Add(time.Duration(i-60) * 15 * time.Second)
+			sample.Values = map[string]float64{"cpu_percent": 12.5 + 8*math.Sin(float64(i)*0.28) + 4*math.Sin(float64(i)*0.73), "memory_percent": 37.2 + 5*math.Sin(float64(i)*0.12), "disk_percent": 86 + float64(i)/30}
+			if _, err := store.Add(ctx, c.Host.ID, "", "host_metrics", sample.ObservedAt, sample); err != nil {
+				return err
+			}
+		}
+	}
 	if _, err := store.Add(ctx, c.Host.ID, "", "host_metrics", now, host); err != nil {
 		return err
 	}

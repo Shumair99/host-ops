@@ -37,9 +37,9 @@ func toolsLines(c config.Config, selected int) []string {
 }
 
 func inspectionPreview(page string, snapshot Snapshot) []string {
-	lines := []string{"ON-DEMAND INSPECTION", "Browsing the menu does not start a remote scan.", "Right/Enter enters this view and starts its first inspection.", "Space requests another inspection; previous results remain visible.", ""}
+	lines := []string{"No inspection recorded"}
 	if page == "disk" {
-		lines = append(lines, console.Bar(snapshot.Host.Values, "disk_percent", "DISK"), "Directory and Docker storage accounting follows on inspection.")
+		lines = append(lines, console.Bar(snapshot.Host.Values, "disk_percent", "DISK"))
 	}
 	return lines
 }

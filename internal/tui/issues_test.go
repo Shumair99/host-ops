@@ -18,7 +18,7 @@ func TestIssuesConsolidatesRepeatedEvidenceAndDoesNotPassEmptyInventory(t *testi
 		s.Reports = append(s.Reports, model.Report{SiteID: site.ID, Name: site.Proxy.Domain, Checks: []model.Check{{Layer: "runtime", State: model.Unknown, Summary: "Shared missing evidence"}, {Layer: "tls", State: model.Fail, Summary: "Certificate failure"}}})
 	}
 	text = strings.Join(issueLines(s), "\n")
-	if strings.Count(text, "Shared missing evidence") != 1 || !strings.Contains(text, "2 domain(s)") || strings.Index(text, "FAIL") > strings.Index(text, "UNKNOWN") {
+	if strings.Count(text, "Shared missing evidence") != 1 || !strings.Contains(text, "2 domains") || strings.Index(text, "FAIL") > strings.Index(text, "UNKNOWN") {
 		t.Fatal("issues were duplicated or important failures were buried", text)
 	}
 }

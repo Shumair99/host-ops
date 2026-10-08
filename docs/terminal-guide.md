@@ -14,13 +14,13 @@ cd /d C:\path\to\host-ops
 bin\hostops.exe dashboard --demo
 ```
 
-PowerShell is convenient because it also runs the project's build and startup scripts. The dashboard itself is the same executable in both shells. It fills the terminal, accepts keyboard input, and restores the ordinary prompt when you quit. Resize to at least 60 columns and 16 rows; 100 by 30 is recommended.
+Windows Terminal with PowerShell is recommended for the colored block meters and box borders. CMD runs the same executable. The dashboard fills the terminal and restores the ordinary prompt when you quit. Minimum size is 60 columns and 16 rows; 120 by 36 gives the resource cards and full site table more room.
 
-The demo header says `DEMO / FICTIONAL DATA - NO NETWORK`. Its CPU, disk, prices, sites and logs are illustrative. It neither reads your VPS nor writes fictional health into your production database. Its history disappears when you exit; incident capsule export writes a local file only when you press `w`.
+The demo header says `DEMO / FICTIONAL DATA`. Its CPU, disk, prices, sites, trends and logs are illustrative. It neither reads your VPS nor writes fictional health into your production database. Its history disappears when you exit; incident capsule export writes a local file only when you press `w`.
 
 ## A five-minute walkthrough
 
-1. On Overview, read the CPU, RAM and DISK bars. The fictional disk is 88% used to demonstrate a capacity warning. Each property's six health symbols follow the layer order below.
+1. On Overview, read the colored CPU, Memory and Root disk meters. The fictional disk is 88% used to demonstrate a capacity warning. The property table uses named health columns; wider terminals show all six checks.
 2. Press `s`. Use Down to select Example Bravo and Enter to open its property view. Scroll to see individual checks, doctor evidence and the Site Passport. Press `l` for fictional logs, then Esc to return to Sites.
 3. Press `t`. The demo stops Bravo's fictional application and supplies the three confirmed failure observations needed to open an incident. DNS, TLS and proxy routing still pass; runtime, local HTTP and public HTTP fail. This is a scenario simulation, not a container stop.
 4. Press `n`. Read the `[OPEN]` incident, symptoms, confidence and investigation. Press `w` if you want a redacted JSON capsule under `local/capsules/`. Review that file before sharing.
@@ -29,17 +29,21 @@ The demo header says `DEMO / FICTIONAL DATA - NO NETWORK`. Its CPU, disk, prices
 7. Try `r` for readiness, `b` for recovery, `p` for capacity, or `x` for dependency impact. On Impact, `/` lets you enter a configured resource such as `caddy` or `alpha`.
 8. Press `q` to return to your shell.
 
-## Read the symbols
+## Read the measurements and states
 
-| Symbol | Meaning |
+| Label | Meaning |
 | --- | --- |
-| `[+]` | Check passed |
-| `[!]` | Confirmed failure |
-| `[~]` | Warning |
-| `[?]` | Missing, unavailable or unknown evidence |
-| `[-]` | Not applicable |
+| `OK` / `PASS` | Check passed; green |
+| `FAIL` / `CRITICAL` | Confirmed failure; red |
+| `WARN` / `WARNING` | Warning; amber |
+| `UNKNOWN` | Missing, unavailable or stale evidence |
+| `N/A` / `SKIP` | Not applicable |
+| `—` on a measurement | No measured value |
+| `≥` on directory size | Partial measurement / lower bound |
 
-The six columns are **R**untime, **L**ocal HTTP, **P**roxy route, **D**NS, **T**LS and public **H**TTP. Narrow terminals use a compact six-character strip with the same order. Unknown CPU/RAM/disk uses question marks rather than a fabricated zero. The overall label is derived from the checks; `HEALTHY` requires successful applicable observations.
+The six checks are Runtime, Local HTTP, Proxy route, DNS, TLS and Public HTTP. Narrow terminals show fewer named columns; the inspector always retains all checks for each address. Meters show measured utilization from 0–100%. Sparklines scale to their own measured peak; Host history adds percent axes and actual timestamps. Blank chart columns indicate missing observations. Retained host history uses 15-second samples and is read locally, without additional VPS commands. The overall label is derived from checks; `HEALTHY` requires successful applicable observations.
+
+Color is automatic in the interactive dashboard. Set `NO_COLOR` or use `--color never` to disable it; `--color always` also colors one-shot output. Status words remain legible without color. Instructions live here and under `?`; the short footer shows controls for the focused pane.
 
 ## Live use
 

@@ -9,6 +9,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/incidents"
 	"github.com/Shumair99/host-ops/internal/storage"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/term"
 	"io"
 	"os"
@@ -22,6 +23,7 @@ type Options struct {
 	Interval              time.Duration
 	NoCollect, Once, Demo bool
 	Page                  string
+	Color                 string
 	Width, Height         int
 }
 type jobs struct {
@@ -55,6 +57,11 @@ type loadedMsg struct {
 	err        error
 }
 type noticeMsg string
+type telemetryMsg struct {
+	generation int
+	snapshot   Snapshot
+	err        error
+}
 type dashboard struct {
 	ctx                                     context.Context
 	source                                  Source
@@ -67,6 +74,9 @@ type dashboard struct {
 	toolSelected                            int
 	menuFocus                               bool
 	viewCache                               map[string][]string
+	detailCache                             map[string]any
+	theme                                   theme
+	telemetryReading                        bool
 	snapshot                                Snapshot
 	lines                                   []string
 	loading, reading, collecting, noCollect bool
@@ -77,6 +87,9 @@ type dashboard struct {
 }
 
 func Run(parent context.Context, c config.Config, dbPath string, opts Options, input io.Reader, out io.Writer) error {
+	if opts.Color != "" && opts.Color != "auto" && opts.Color != "always" && opts.Color != "never" {
+		return fmt.Errorf("color must be auto, always or never")
+	}
 	if opts.Interval == 0 {
 		opts.Interval = 30 * time.Second
 	}
@@ -137,7 +150,7 @@ func Run(parent context.Context, c config.Config, dbPath string, opts Options, i
 		if err != nil {
 			return err
 		}
-		m.lines, err = m.source.Page(ctx, m.page, "", m.target, m.snapshot)
+		m.lines, err = m.source.Evidence(ctx, m.page, "", m.target, &m.snapshot)
 		if err != nil {
 			return err
 		}
@@ -145,7 +158,11 @@ func Run(parent context.Context, c config.Config, dbPath string, opts Options, i
 		_, err = fmt.Fprintln(out, m.frame())
 		return err
 	}
-	program := tea.NewProgram(m, tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(out))
+	programOptions := []tea.ProgramOption{tea.WithContext(ctx), tea.WithInput(input), tea.WithOutput(out)}
+	if opts.Color == "always" {
+		programOptions = append(programOptions, tea.WithColorProfile(colorprofile.ANSI256))
+	}
+	program := tea.NewProgram(m, programOptions...)
 	_, err = program.Run()
 	cancel()
 	m.jobs.close()
@@ -166,7 +183,8 @@ func newDashboard(ctx context.Context, source Source, opts Options) dashboard {
 	if page == "" {
 		page = "overview"
 	}
-	m := dashboard{ctx: ctx, source: source, jobs: &jobs{}, interval: opts.Interval, width: width, height: height, page: page, target: "host", noCollect: opts.NoCollect, loading: true, menuFocus: true, viewCache: map[string][]string{}, collecting: !opts.NoCollect && !opts.Demo && !opts.Once}
+	m := dashboard{ctx: ctx, source: source, jobs: &jobs{}, interval: opts.Interval, width: width, height: height, page: page, target: "host", noCollect: opts.NoCollect, loading: true, menuFocus: true, viewCache: map[string][]string{}, detailCache: map[string]any{}, collecting: !opts.NoCollect && !opts.Demo && !opts.Once}
+	m.theme.color = opts.Color == "always" || (opts.Color != "never" && !opts.Once && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb")
 	m.navSelected = menuIndex(page)
 	return m
 }
@@ -183,7 +201,7 @@ func (m dashboard) readCmd(generation int) tea.Cmd {
 		if err != nil {
 			return loadedMsg{generation: generation, err: err}
 		}
-		lines, err := m.source.Page(m.ctx, m.page, m.siteID, m.target, snapshot)
+		lines, err := m.source.Evidence(m.ctx, m.page, m.siteID, m.target, &snapshot)
 		return loadedMsg{generation: generation, snapshot: snapshot, lines: lines, err: err}
 	})
 }
@@ -201,7 +219,7 @@ func (m *dashboard) reload() tea.Cmd {
 		if err != nil {
 			return loadedMsg{generation: generation, err: err}
 		}
-		lines, err := source.Page(ctx, page, siteID, target, snapshot)
+		lines, err := source.Evidence(ctx, page, siteID, target, &snapshot)
 		return loadedMsg{generation: generation, snapshot: snapshot, lines: lines, err: err}
 	})
 }
@@ -214,6 +232,7 @@ func (m *dashboard) goPage(page string) tea.Cmd {
 	m.menuFocus = false
 	m.loading = true
 	m.lines = nil
+	m.snapshot.Detail = nil
 	m.offset = 0
 	m.notice = ""
 	m.siteID = ""
@@ -256,6 +275,7 @@ func (m *dashboard) previewMenu(index int) tea.Cmd {
 		m.navSelected, m.menuFocus = index, true
 		m.loading, m.reading, m.notice = false, false, ""
 		m.lines = m.viewCache[page]
+		m.snapshot.Detail = m.detailCache[page]
 		if len(m.lines) == 0 {
 			m.lines = inspectionPreview(page, m.snapshot)
 		}
@@ -265,6 +285,7 @@ func (m *dashboard) previewMenu(index int) tea.Cmd {
 	m.menuFocus = true
 	if cached := m.viewCache[page]; len(cached) > 0 {
 		m.lines, m.loading = cached, false
+		m.snapshot.Detail = m.detailCache[page]
 	}
 	return cmd
 }
@@ -304,15 +325,30 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = "Refresh failed; showing previous evidence: " + msg.err.Error()
 			}
 		} else {
+			// A slow Disk scan must not roll back recent streamed telemetry.
+			// An older cached sample must never override a fresh stale-data decision.
+			if m.page == "disk" && time.Since(m.snapshot.Host.ObservedAt) < 5*time.Second && m.snapshot.Host.ObservedAt.After(msg.snapshot.Host.ObservedAt) {
+				msg.snapshot.Host = m.snapshot.Host
+			}
 			m.snapshot, m.lines = msg.snapshot, msg.lines
 			if m.siteID == "" {
 				m.viewCache[m.page] = append([]string(nil), msg.lines...)
+				m.detailCache[m.page] = msg.snapshot.Detail
 			}
 			if strings.HasPrefix(m.notice, "Refresh failed; showing previous evidence:") {
 				m.notice = ""
 			}
 		}
 		m.selected = min(m.selected, max(0, len(m.filteredSites())-1))
+	case telemetryMsg:
+		m.telemetryReading = false
+		if msg.generation == m.generation && msg.err == nil {
+			msg.snapshot.Detail = m.snapshot.Detail
+			if m.snapshot.Disk != nil && (msg.snapshot.Disk == nil || m.snapshot.Disk.ObservedAt.After(msg.snapshot.Disk.ObservedAt)) {
+				msg.snapshot.Disk = m.snapshot.Disk
+			}
+			m.snapshot = msg.snapshot
+		}
 	case cycleMsg:
 		m.collecting = false
 		m.demoBusy = false
@@ -344,6 +380,14 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tickMsg:
 		tick := tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })
+		if m.page == "disk" && !m.telemetryReading {
+			m.telemetryReading = true
+			source, ctx, generation := m.source, m.ctx, m.generation
+			return m, tea.Batch(tick, m.jobs.command(func() tea.Msg {
+				snapshot, err := source.Base(ctx)
+				return telemetryMsg{generation: generation, snapshot: snapshot, err: err}
+			}))
+		}
 		if !m.loading && !m.reading && (m.page == "overview" || m.page == "sites" || m.page == "issues" || m.page == "host" || m.page == "inventory" || m.page == "site") {
 			return m, tea.Batch(tick, m.reload())
 		}
@@ -463,7 +507,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.page == "sites" {
 				m.selected = max(0, len(m.filteredSites())-1)
 			} else {
-				m.offset = max(0, len(wrap(m.liveLines(), max(1, m.width-25)))-max(1, m.height-9))
+				m.offset = max(0, len(wrap(m.liveLines(), m.bodyWidth()))-m.bodyHeight())
 			}
 		case "enter":
 			if m.menuFocus {
@@ -552,7 +596,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if m.page != "sites" {
-		m.offset = min(m.offset, max(0, len(wrap(m.liveLines(), max(1, m.width-25)))-max(1, m.height-9)))
+		m.offset = min(m.offset, max(0, len(wrap(m.liveLines(), m.bodyWidth()))-m.bodyHeight()))
 	}
 	return m, nil
 }

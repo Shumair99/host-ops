@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/storage"
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"sync"
 	"testing"
@@ -68,7 +70,7 @@ func finish(m dashboard, cmd tea.Cmd) dashboard {
 	return v.(dashboard)
 }
 
-func TestASCIIFrameFitsResizedTerminals(t *testing.T) {
+func TestStyledFrameFitsResizedTerminals(t *testing.T) {
 	m := testDashboard(t)
 	for _, size := range [][2]int{{100, 30}, {80, 24}, {60, 16}, {140, 40}} {
 		m.width, m.height = size[0], size[1]
@@ -82,12 +84,12 @@ func TestASCIIFrameFitsResizedTerminals(t *testing.T) {
 				t.Fatalf("%s rows=%d want=%d", item.Page, len(rows), m.height)
 			}
 			for _, row := range rows {
-				if len(row) > m.width {
-					t.Fatalf("%s width=%d want<=%d", item.Page, len(row), m.width)
+				if ansi.StringWidth(row) > m.width {
+					t.Fatalf("%s width=%d want<=%d", item.Page, ansi.StringWidth(row), m.width)
 				}
-				for _, r := range row {
-					if r > 127 || r == 27 {
-						t.Fatal("frame contains non-ASCII or escape control")
+				for _, r := range ansi.Strip(row) {
+					if r < 32 || r == 127 {
+						t.Fatal("frame contains unexpected control characters")
 					}
 				}
 			}
@@ -180,18 +182,21 @@ func TestMenuPreviewDoesNotRunDiskInspectionAndReusesEvidence(t *testing.T) {
 	m.source.Demo = false
 	index := menuIndex("disk")
 	cmd := m.previewMenu(index)
-	if cmd != nil || m.page != "disk" || !m.menuFocus || !strings.Contains(m.frame(), "ON-DEMAND INSPECTION") {
+	if cmd != nil || m.page != "disk" || !m.menuFocus || !strings.Contains(m.frame(), "Directory sizes") || strings.Contains(m.frame(), "Browsing the menu") {
 		t.Fatal("browsing Disk started a remote scan or failed to preview it")
 	}
 	m, cmd = press(m, "right")
 	if cmd == nil || m.menuFocus || !m.loading {
 		t.Fatal("entering a cold inspection did not start its read")
 	}
-	v, _ := m.Update(loadedMsg{generation: m.generation, snapshot: m.snapshot, lines: []string{"RETAINED DISK ACCOUNTING"}})
+	snapshot := m.snapshot
+	disk := metrics.DiskReport{Directories: []metrics.DiskEntry{{Path: "/retained", Bytes: 1234}}}
+	snapshot.Disk = &disk
+	v, _ := m.Update(loadedMsg{generation: m.generation, snapshot: snapshot, lines: []string{"RETAINED DISK ACCOUNTING"}})
 	m = v.(dashboard)
 	m.previewMenu(menuIndex("overview"))
 	cmd = m.previewMenu(index)
-	if cmd != nil || !strings.Contains(m.frame(), "RETAINED DISK ACCOUNTING") {
+	if cmd != nil || !strings.Contains(m.frame(), "/retained") {
 		t.Fatal("revisiting an inspection discarded its evidence or ran another scan")
 	}
 }
@@ -297,7 +302,7 @@ func TestFleetRowsStayTogetherAndHeadersCannotInjectRows(t *testing.T) {
 			m.page = page
 			for _, line := range m.liveLines() {
 				if strings.Contains(line, "Example alpha") || strings.Contains(line, "Example bravo") {
-					if len(line) > width-25 {
+					if ansi.StringWidth(line) > m.bodyWidth() {
 						t.Fatalf("fleet row wraps at width %d: %q", width, line)
 					}
 				}

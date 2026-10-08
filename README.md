@@ -1,6 +1,6 @@
 # Amadeus HostOps
 
-A terminal operations desk that discovers websites on a Linux server. Connect with SSH, and HostOps combines runtime, proxy, service and socket observations into one inventory. The ASCII dashboard runs in PowerShell, CMD or a Linux terminal, with local SQLite history.
+A terminal operations desk that discovers websites on a Linux server. Connect with SSH, and HostOps combines runtime, proxy, service and socket observations into one inventory. The colored dashboard runs in PowerShell, CMD or a Linux terminal, with local SQLite history, resource meters and measured trends.
 
 CPU and RAM refresh every second through direct Linux kernel-file reads. Container metrics, inventory and root disk refresh every 30 seconds. Sites come from observed proxy domains; you do not need to register them in JSON. Overview and Sites combine observed base/`www` domain pairs into one row; the inspector retains each domain's independent checks. Discovery coverage and unavailable sources are visible alongside the sites.
 
@@ -39,6 +39,8 @@ Use a terminal at least 60 columns by 16 rows; 100 by 30 or larger shows more ev
 Costs are optional. `hostops billing` connects a Hetzner server or Hostinger subscription through API reads, or stores an explicit manual budget. Tokens stay in environment variables; estimates show their source and exclude expenses the reader cannot establish. Self-hosted machines can leave cost tracking disabled. See [billing setup](docs/economics.md).
 
 Read the [terminal guide and walkthrough](docs/terminal-guide.md) for the full demo, live use and keyboard map. One-shot commands also produce readable text; add `--json` for scripts:
+
+Windows Terminal with PowerShell is recommended. At 120 columns, Overview shows three resource cards and all six health columns; smaller windows use compact panels. Press `?` for instructions. Interactive colors are automatic; `NO_COLOR` or `--color never` disables them. `--once` omits color unless `--color always` is requested.
 
 ```powershell
 .\bin\hostops.exe doctor --config local/hostops.json

@@ -3,10 +3,11 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Shumair99/host-ops/internal/config"
-	"github.com/Shumair99/host-ops/internal/console"
-	"github.com/Shumair99/host-ops/internal/model"
 	"strings"
+
+	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/model"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type menuItem struct{ Key, Page, Label string }
@@ -17,7 +18,6 @@ var menu = []menuItem{
 	{"e", "events", "Timeline"}, {"n", "incidents", "Incidents"}, {"v", "monitoring", "Health log"},
 	{"a", "tools", "Tools"}, {"?", "help", "Help"},
 }
-
 var toolMenu = []menuItem{
 	{"u", "security", "Security"}, {"p", "capacity", "Capacity"}, {"x", "impact", "Impact"},
 	{"r", "readiness", "Readiness"}, {"b", "recovery", "Recovery"}, {"f", "preflight", "Preflight"},
@@ -25,15 +25,12 @@ var toolMenu = []menuItem{
 	{"c", "costs", "Costs / setup"},
 }
 
-func allViews() []menuItem {
-	return append(append([]menuItem(nil), menu...), toolMenu...)
-}
-
+func allViews() []menuItem { return append(append([]menuItem(nil), menu...), toolMenu...) }
 func (m dashboard) filteredSites() []config.Site {
 	out := []config.Site{}
-	for _, group := range groupSites(m.rawSites()) {
-		if group.matches(m.filter) {
-			out = append(out, group.Primary)
+	for _, g := range groupSites(m.rawSites()) {
+		if g.matches(m.filter) {
+			out = append(out, g.Primary)
 		}
 	}
 	return out
@@ -41,235 +38,186 @@ func (m dashboard) filteredSites() []config.Site {
 func (m dashboard) report(id string) model.Report {
 	return groupReport(groupFor(m.rawSites(), id), reportsByID(m.snapshot.Reports))
 }
+func (m dashboard) bodyWidth() int  { return max(1, m.width-22) }
+func (m dashboard) bodyHeight() int { return max(1, m.height-5) }
 func (m dashboard) liveLines() []string {
-	lines := []string{}
-	add := func(s string) { lines = append(lines, console.Safe(s)) }
-	if m.page == "tools" {
-		return toolsLines(m.source.Config, m.toolSelected)
+	w := m.bodyWidth()
+	switch m.page {
+	case "overview":
+		return m.overviewLines(w)
+	case "sites":
+		return m.siteTable(w, true)
+	case "host":
+		return m.hostLines(w)
+	case "site":
+		return m.inspectorLines(w)
+	case "disk":
+		return m.diskLines(w)
+	case "inventory":
+		return m.inventoryPanel(w)
+	case "tools":
+		return m.toolsPanel(w)
+	case "issues":
+		return m.theme.panel("Exceptions", m.decorate(issueLines(m.snapshot)), w)
 	}
-	if m.page == "sites" {
-		nameWidth, compact := m.fleetLayout(true)
-		add(fmt.Sprintf("  %-*s %-9s %s", nameWidth, "PROPERTY", "HEALTH", layerHeading(compact)))
-		filter := m.filter
-		if filter == "" {
-			filter = "(all)"
-		}
-		add("Filter: " + filter)
-		for i, s := range m.filteredSites() {
-			cursor := " "
-			if i == m.selected {
-				cursor = ">"
-			}
-			r := m.report(s.ID)
-			add(fmt.Sprintf("%s %-*s %-9s %s", cursor, nameWidth, clip(console.Safe(s.Name), nameWidth), strings.ToUpper(r.Overall), fleetChain(r, compact)))
-		}
-		add("")
-		add("Up/Down select | Enter inspect | / filter")
-		return lines
+	if m.loading && len(m.lines) == 0 {
+		return m.theme.panel(pageLabel(m.page), []string{m.theme.paint("Awaiting evidence…", muted)}, w)
 	}
-	if m.page == "issues" {
-		return issueLines(m.snapshot)
+	if m.page == "help" {
+		return m.theme.panel("Help / keyboard & monitoring", m.decorate(m.lines), w)
 	}
-	if m.page == "overview" {
-		add("HOST " + m.source.Config.Host.ID + "  |  " + m.source.Config.Host.Name)
-		if m.source.Live && !m.snapshot.Connection.Connected {
-			add("Collector: connecting or unavailable")
-			if m.snapshot.Connection.Issue != "" {
-				add(m.snapshot.Connection.Issue)
-			}
+	return m.detailLines(w)
+}
+func pageLabel(page string) string {
+	for _, v := range allViews() {
+		if v.Page == page {
+			return v.Label
 		}
-		add(console.Bar(m.snapshot.Host.Values, "cpu_percent", "CPU"))
-		add(console.Bar(m.snapshot.Host.Values, "memory_percent", "RAM"))
-		add(console.Bar(m.snapshot.Host.Values, "disk_percent", "DISK"))
-		if n, ok := m.snapshot.Host.Values["disk_free_bytes"]; ok {
-			add("Available disk: " + console.Bytes(n))
-		}
-		add("Host observation: " + console.At(m.snapshot.Host.ObservedAt))
-		add("")
-		add("PRODUCTION PROPERTIES")
-		nameWidth, compact := m.fleetLayout(false)
-		add(fmt.Sprintf("%-*s %-9s %s", nameWidth, "PROPERTY", "HEALTH", layerHeading(compact)))
-		for _, s := range m.sites() {
-			r := m.report(s.ID)
-			add(fmt.Sprintf("%-*s %-9s %s", nameWidth, clip(console.Safe(s.Name), nameWidth), strings.ToUpper(r.Overall), fleetChain(r, compact)))
-		}
-		add("")
-		add("[+] pass  [!] fail  [~] warn  [?] unknown  [-] N/A")
-		if n, ok := m.snapshot.Host.Values["disk_percent"]; ok && n >= 80 {
-			add("")
-			add(fmt.Sprintf("ATTENTION: root disk %.1f%% used. Press d to inspect.", n))
-		}
-		add("")
-		add("RECENT EVENTS")
-		if len(m.snapshot.Events) == 0 {
-			add("No changes recorded yet.")
-		}
-		for _, r := range m.snapshot.Events {
-			add(fmt.Sprintf("%s  %s  %s", console.At(r.ObservedAt), r.SiteID, recordSummary(r.Data)))
-		}
-		return lines
 	}
-	if m.loading {
-		return []string{"Reading " + m.page + " evidence...", "", "You can switch views or quit while the read runs."}
-	}
-	return m.lines
+	return strings.Title(page)
 }
 func recordSummary(data []byte) string {
 	var fields map[string]any
 	if json.Unmarshal(data, &fields) == nil {
 		for _, key := range []string{"summary", "finding", "type", "status", "overall"} {
-			if value, ok := fields[key].(string); ok && value != "" {
-				return console.Safe(value)
+			if v, ok := fields[key].(string); ok && v != "" {
+				return clean(v)
 			}
 		}
 	}
 	return "Recorded event"
 }
-func (m dashboard) fleetLayout(cursor bool) (int, bool) {
-	width := m.width - 25
-	compact := width < 50
-	chainWidth, maximum := 23, 21
-	if compact {
-		chainWidth = 6
-	}
-	if cursor {
-		width -= 2
-		maximum = 19
-	}
-	return max(8, min(maximum, width-chainWidth-11)), compact
-}
-func layerHeading(compact bool) string {
-	if compact {
-		return "RLPDTH"
-	}
-	return " R   L   P   D   T   H"
-}
-func fleetChain(r model.Report, compact bool) string {
-	s := chain(r)
-	if compact {
-		s = strings.NewReplacer("[", "", "]", "", " ", "").Replace(s)
-	}
-	return s
-}
-func clip(s string, width int) string {
-	if width < 1 {
-		return ""
-	}
-	if len(s) > width {
-		if width > 3 {
-			return s[:width-3] + "..."
-		}
-		return s[:width]
-	}
-	return s
-}
-func pad(s string, width int) string {
-	s = strings.NewReplacer("\n", " ", "\t", " ").Replace(console.Safe(s))
-	s = clip(s, width)
-	return s + strings.Repeat(" ", max(0, width-len(s)))
-}
-func wrap(lines []string, width int) []string {
+func (m dashboard) decorate(lines []string) []string {
 	out := []string{}
 	for _, raw := range lines {
-		for _, s := range strings.Split(console.Safe(raw), "\n") {
-			s = strings.ReplaceAll(s, "\t", "  ")
-			if s == "" {
-				out = append(out, "")
-				continue
-			}
-			for len(s) > width {
-				cut := width
-				if at := strings.LastIndex(s[:width], " "); at > width/2 {
-					cut = at
-				}
-				out = append(out, s[:cut])
-				s = strings.TrimLeft(s[cut:], " ")
-			}
-			out = append(out, s)
+		line := consoleLine(raw)
+		color := ink
+		s := strings.ToUpper(line)
+		if strings.Contains(s, "[FAIL") || strings.Contains(s, "[CRITICAL") || strings.HasPrefix(s, "[OPEN]") {
+			color = red
+		} else if strings.Contains(s, "[WARN") {
+			color = amber
+		} else if strings.Contains(s, "[UNKNOWN") || strings.HasPrefix(s, "UNKNOWN") {
+			color = muted
+		} else if strings.Contains(s, "[PASS") || strings.Contains(s, "[HEALTHY") {
+			color = mint
 		}
+		if strings.TrimSpace(line) != "" && line == strings.ToUpper(line) && color == ink {
+			color = cyan
+		}
+		out = append(out, wrap([]string{m.theme.paint(line, color)}, max(1, m.bodyWidth()-4))...)
 	}
 	return out
 }
+
+// Untrusted record/log text is sanitized before adding renderer-owned styles.
+func consoleLine(s string) string { return clean(s) }
 func (m dashboard) frame() string {
-	width, height := m.width, m.height
-	if width < 60 || height < 16 {
-		return "AMADEUS HOSTOPS\nResize the terminal to at least 60 columns x 16 rows.\nPress q to quit."
+	w, h := m.width, m.height
+	t := m.theme
+	if w < 60 || h < 16 {
+		return "HOSTOPS\nResize to at least 60 columns × 16 rows.\nq quit"
 	}
-	navWidth := 18
-	bodyWidth := width - navWidth - 7
-	bodyHeight := height - 9
-	border := "+" + strings.Repeat("-", width-2) + "+"
-	line := func(s string) string { return "| " + pad(s, width-4) + " |" }
 	mode := "LIVE / READ-ONLY"
 	if m.source.Demo {
-		mode = "DEMO / FICTIONAL DATA - NO NETWORK"
+		mode = "DEMO / FICTIONAL DATA"
 	} else if m.noCollect {
-		mode = "AUTO COLLECTION OFF / MANUAL READS"
+		mode = "RETAINED / AUTO OFF"
 	}
-	state := "IDLE"
-	if m.source.Live {
-		state = "STREAMING"
+	title := pageLabel(m.page)
+	if m.siteID != "" {
+		title = pageLabel(m.page) + " / " + clean(m.report(m.siteID).Name)
+		if m.page == "site" {
+			title = clean(m.report(m.siteID).Name)
+		}
 	}
-	if m.collecting {
+	head := t.strong("HOSTOPS", cyan) + t.paint(" / ", edge) + t.strong(title, ink)
+	right := t.paint(mode, muted)
+	rows := []string{pad(head, max(1, w-ansi.StringWidth(right)-2)) + "  " + right}
+	host := clean(m.source.Config.Host.Name)
+	if host == "" {
+		host = clean(m.source.Config.Host.ID)
+	}
+	state := "LOCAL HISTORY"
+	if m.source.Demo {
+		state = "OFFLINE"
+	} else if m.source.Live {
+		if m.snapshot.Connection.Connected {
+			state = "CONNECTED"
+		} else {
+			state = "CONNECTING"
+		}
+	} else if m.collecting {
 		state = "COLLECTING"
 	}
 	if m.collectErr != "" {
 		state = "COLLECTION ERROR"
 	}
-	rows := []string{border, line("AMADEUS HOSTOPS  /  TERMINAL OPERATIONS DESK"), line(mode + "  |  " + m.source.Config.Host.ID + "  |  " + state), border}
-	title := strings.ToUpper(m.page)
-	if m.siteID != "" {
-		title += " / " + m.siteID
-	}
-	menuTitle := "VIEWS"
-	if m.menuFocus {
-		menuTitle += " [FOCUS]"
-	} else {
-		title += " [FOCUS]"
-	}
-	rows = append(rows, "| "+pad(menuTitle, navWidth)+" | "+pad(title, bodyWidth)+" |")
-	content := wrap(m.liveLines(), bodyWidth)
+	rows = append(rows, pad(t.paint(host, ink)+"  "+t.paint(state, statusColor(state))+"  "+t.paint("Observed "+ageLabel(m.snapshot.Host.ObservedAt), muted), w), t.paint(strings.Repeat("─", w), edge))
+	content := wrap(m.liveLines(), m.bodyWidth())
+	bodyHeight := m.bodyHeight()
 	offset := min(m.offset, max(0, len(content)-bodyHeight))
 	if m.page == "sites" {
-		offset = min(max(0, m.selected-bodyHeight+4), max(0, len(content)-bodyHeight))
+		offset = min(max(0, m.selected-bodyHeight+5), max(0, len(content)-bodyHeight))
 	} else if m.page == "tools" {
-		offset = min(max(0, 2*m.toolSelected-bodyHeight+5), max(0, len(content)-bodyHeight))
+		offset = min(max(0, m.toolSelected-bodyHeight+4), max(0, len(content)-bodyHeight))
 	}
-	active := m.navSelected
-	navStart := max(0, min(active-bodyHeight/2, len(menu)-bodyHeight))
+	navHeight := bodyHeight - 1
+	navStart := max(0, min(m.navSelected-navHeight/2, len(menu)-navHeight))
 	for row := 0; row < bodyHeight; row++ {
 		left := ""
-		index := navStart + row
-		if index < len(menu) {
-			item := menu[index]
-			cursor := " "
-			if m.menuFocus && index == m.navSelected {
-				cursor = ">"
-			} else if index == menuIndex(m.page) {
-				cursor = "*"
+		if row == 0 {
+			left = t.strong("VIEWS", muted)
+			if m.menuFocus {
+				left = t.strong("VIEWS  ‹", cyan)
 			}
-			left = cursor + "[" + item.Key + "] " + item.Label
-		}
-		right := ""
-		if row+offset < len(content) {
-			right = content[row+offset]
-		}
-		rows = append(rows, "| "+pad(left, navWidth)+" | "+pad(right, bodyWidth)+" |")
-	}
-	rows = append(rows, border)
-	notice := m.notice
-	if m.inputKind != "" {
-		notice = m.inputKind + ": " + m.input + "_  (Enter apply, Esc cancel)"
-	} else if m.collectErr != "" {
-		notice = "Collection failed; check SSH/manifest. Previous evidence remains."
-	}
-	if notice == "" {
-		if m.menuFocus {
-			notice = "Menu: Up/Down preview | Right/Enter focus content | letter shortcut"
 		} else {
-			notice = fmt.Sprintf("%d-%d of %d lines | Up/Down scroll | Left menu | Space refresh", min(offset+1, len(content)), min(offset+bodyHeight, len(content)), len(content))
+			i := navStart + row - 1
+			if i < len(menu) {
+				item := menu[i]
+				left = " " + t.paint(item.Key, cyan) + "  " + t.paint(item.Label, muted)
+				if i == menuIndex(m.page) {
+					left = t.strong(" "+item.Key+"  "+item.Label, ink)
+				}
+				if m.menuFocus && i == m.navSelected {
+					left = t.selection(" "+item.Key+"  "+item.Label, 18)
+				}
+			}
 		}
+		body := ""
+		if row+offset < len(content) {
+			body = content[row+offset]
+		}
+		rows = append(rows, pad(left, 18)+" "+t.paint("│", edge)+" "+pad(body, m.bodyWidth())+" ")
 	}
-	rows = append(rows, line(notice), line("Tab switch pane | F5 collect | Enter inspect site | ? help | q quit"), border)
+	footer := m.keyBar()
+	if m.notice != "" {
+		footer = clean(m.notice)
+	}
+	if m.collectErr != "" {
+		footer = "Collector unavailable · retained evidence"
+	}
+	if m.inputKind != "" {
+		footer = clean(m.inputKind+": "+m.input) + "▏  Enter apply · Esc cancel"
+	}
+	if len(content) > bodyHeight {
+		footer += fmt.Sprintf("  %d/%d", min(offset+bodyHeight, len(content)), len(content))
+	}
+	rows = append(rows, pad(t.paint(footer, muted), w), pad(t.paint("? help", cyan)+t.paint("   q quit", muted), w))
 	return strings.Join(rows, "\n")
+}
+func (m dashboard) keyBar() string {
+	if m.menuFocus {
+		return "↑↓ view   → focus   letter jump"
+	}
+	switch m.page {
+	case "sites":
+		return "↑↓ site   Enter inspect   / filter   ← views"
+	case "site":
+		return "↑↓ scroll   l logs   a readiness   b recovery   Esc back"
+	case "tools":
+		return "↑↓ tool   Enter open   ← views"
+	default:
+		return "↑↓ scroll   Space refresh   ← views"
+	}
 }

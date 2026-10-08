@@ -30,6 +30,10 @@ type Snapshot struct {
 	Connection agent.Connection
 	Reports    []model.Report
 	Host       metrics.Sample
+	History    []metrics.Sample
+	Workloads  map[string]metrics.Sample
+	Disk       *metrics.DiskReport
+	Detail     any
 	Events     []storage.Record
 	LoadedAt   time.Time
 }
@@ -114,11 +118,17 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 		}
 		snapshot.Reports = append(snapshot.Reports, r)
 	}
-	host, err := s.Store.Query(ctx, s.Config.Host.ID, "", "host_metrics", time.Time{}, 1)
+	host, err := s.Store.Query(ctx, s.Config.Host.ID, "", "host_metrics", time.Time{}, 120)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	if len(host) > 0 {
+		for i := len(host) - 1; i >= 0; i-- {
+			var sample metrics.Sample
+			if json.Unmarshal(host[i].Data, &sample) == nil {
+				snapshot.History = append(snapshot.History, sample)
+			}
+		}
 		if err = json.Unmarshal(host[0].Data, &snapshot.Host); err != nil {
 			return Snapshot{}, err
 		}
@@ -140,11 +150,42 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 			snapshot.Host.Unavailable = append(snapshot.Host.Unavailable, "Telemetry is stale; collector connection may be unavailable")
 		}
 	}
+	snapshot.Workloads = map[string]metrics.Sample{}
+	workloads, err := s.Store.Query(ctx, s.Config.Host.ID, "", "metrics", time.Time{}, 200)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	for _, record := range workloads {
+		if _, exists := snapshot.Workloads[record.SiteID]; exists {
+			continue
+		}
+		var sample metrics.Sample
+		if json.Unmarshal(record.Data, &sample) == nil {
+			if !s.Demo && time.Since(sample.ObservedAt) > age {
+				sample.Values = nil
+			}
+			snapshot.Workloads[record.SiteID] = sample
+		}
+	}
+	if data, err := s.Store.State(ctx, s.Config.Host.ID, "", "disk_inspection"); err != nil {
+		return Snapshot{}, err
+	} else if len(data) > 0 {
+		var disk metrics.DiskReport
+		if json.Unmarshal(data, &disk) == nil {
+			snapshot.Disk = &disk
+		}
+	}
 	snapshot.Events, err = s.Store.Query(ctx, s.Config.Host.ID, "", "event", time.Now().Add(-24*time.Hour), 12)
 	return snapshot, err
 }
 
 func (s Source) Page(ctx context.Context, page, siteID, target string, snapshot Snapshot) ([]string, error) {
+	return s.Evidence(ctx, page, siteID, target, &snapshot)
+}
+
+// Evidence retains typed reports for the terminal widgets while Page supplies
+// the existing plain text command presentation.
+func (s Source) Evidence(ctx context.Context, page, siteID, target string, snapshot *Snapshot) ([]string, error) {
 	if snapshot.Sites != nil {
 		s.Config.Sites = snapshot.Sites
 	}
@@ -181,14 +222,23 @@ func (s Source) Page(ctx context.Context, page, siteID, target string, snapshot 
 		if err != nil {
 			return nil, err
 		}
-		return append([]string{"Latest 200 lines; common secrets redacted. Review before sharing.", ""}, strings.Split(console.Safe(text), "\n")...), nil
+		return strings.Split(console.Safe(text), "\n"), nil
 	case "host":
 		return console.Format("metrics", snapshot.Host), nil
 	case "disk":
 		if s.Demo {
-			return console.Format("disk", DemoDisk()), nil
+			disk := DemoDisk()
+			snapshot.Disk = &disk
+			return console.Format("disk", disk), nil
 		}
-		return console.Format("disk", metrics.Disk(ctx, runner, s.Config.Host)), nil
+		disk := metrics.Disk(ctx, runner, s.Config.Host)
+		snapshot.Disk = &disk
+		if s.Store != nil {
+			if err := s.Store.Transition(ctx, s.Config.Host.ID, "", "disk_inspection", disk, "", disk.ObservedAt, nil); err != nil {
+				return nil, err
+			}
+		}
+		return console.Format("disk", disk), nil
 	case "readiness":
 		out := []readiness.Assessment{}
 		for _, site := range sites {
@@ -202,6 +252,7 @@ func (s Source) Page(ctx context.Context, page, siteID, target string, snapshot 
 			}
 			out = append(out, a)
 		}
+		snapshot.Detail = out
 		return console.Format("readiness", out), nil
 	case "recovery":
 		out := []recovery.Assessment{}
@@ -212,30 +263,41 @@ func (s Source) Page(ctx context.Context, page, siteID, target string, snapshot 
 			}
 			out = append(out, a)
 		}
+		snapshot.Detail = out
 		return console.Format("recovery", out), nil
 	case "costs":
 		r, err := costs.Assess(ctx, s.Config, s.Store)
+		snapshot.Detail = r
 		return console.Format("costs", r), err
 	case "capacity":
 		r, err := capacity.Assess(ctx, s.Config, s.Store)
+		snapshot.Detail = r
 		return console.Format("capacity", r), err
 	case "security":
 		if s.Demo {
-			return console.Format("security", DemoSecurity()), nil
+			r := DemoSecurity()
+			snapshot.Detail = r
+			return console.Format("security", r), nil
 		}
 		r := security.Inspect(ctx, s.Config, snapshot.Reports, runner)
+		snapshot.Detail = r
 		return console.Format("security", r), nil
 	case "preflight":
 		if s.Demo {
-			return console.Format("preflight", DemoPreflight(s.Config)), nil
+			r := DemoPreflight(s.Config)
+			snapshot.Detail = r
+			return console.Format("preflight", r), nil
 		}
 		r, err := preflight.Assess(ctx, s.Config, "reboot", snapshot.Reports, s.Store, runner)
+		snapshot.Detail = r
 		return console.Format("preflight", r), err
 	case "impact":
 		r, err := preflight.Dependency(s.Config, target)
+		snapshot.Detail = r
 		return console.Format("impact", r), err
 	case "incidents":
 		records, err := incidents.List(ctx, s.Store, s.Config.Host.ID, siteID)
+		snapshot.Detail = records
 		return console.Format("incidents", records), err
 	case "help":
 		return HelpLines(), nil
@@ -340,8 +402,28 @@ func HelpLines() []string {
 		"SSH starts a bundled Linux collector in the remote user's private cache.",
 		"Checks never restart, deploy, prune, remove files or reboot.",
 		"DEMO is clearly labelled fictional data and makes no network calls.", "",
-		"[+] passed  [!] failed  [~] warning  [?] unknown  [-] not applicable",
-		"Layer order: runtime, local HTTP, proxy, DNS, TLS, public HTTP.",
+		"HEALTH: green healthy, amber warning, red critical; words also carry state.",
+		"OK passed; FAIL failed; WARN warning; UNKNOWN missing evidence; N/A inapplicable.",
+		"Fleet columns expand with terminal width; all six checks remain in the inspector.",
+		"Meters use measured 0-100% utilization; a dash means no measurement.",
+		"Sparklines use relative scale; Host history has percent axes and actual timestamps.",
+		"Retained host history is sampled every 15s; blank chart columns are gaps.",
+		"Property metrics cover associated workloads; shared backends are not unique usage.",
+		"Property CPU may exceed 100% when workloads use several cores.",
+		"Directory bars compare sizes to the largest row, not summed filesystem use.",
+		"Directory rows may overlap; >= totals are lower bounds from partial scans.",
+		"Saved Disk accounting remains available across dashboard restarts.",
+		"Color: --color auto|always|never; NO_COLOR disables auto color.",
+		"Windows Terminal with PowerShell is recommended for block and box glyphs.",
+		"Optional billing: hostops billing list --provider hetzner (or hostinger)",
+		"Connect budget: hostops billing set --provider NAME --resource ID",
+		"Manual: hostops billing set --provider manual --monthly AMOUNT --currency GBP",
+		"Own hardware: hostops billing set --provider self-hosted (budget optional)",
+		"Cost allocation is an estimate over latest 1000 samples per property in 24h.",
+		"Missing aggregate usage uses equal resource shares; unmanaged services are shared overhead.",
+		"Backups/restores are operator-reported evidence; HostOps does not verify artifacts.",
+		"Impact covers observed/configured dependencies; hidden dependencies may add sites.",
+		"Logs show the latest 200 lines with common secret patterns redacted.",
 		"UNKNOWN is missing evidence, not a zero measurement or a pass.",
 		"Existing deployment workflows keep responsibility for deployment.",
 		"Record evidence: hostops record deployment --file local/deploy.json",

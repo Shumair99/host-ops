@@ -12,10 +12,10 @@ import (
 func issueLines(snapshot Snapshot) []string {
 	lines := []string{}
 	if disk, ok := snapshot.Host.Values["disk_percent"]; ok && disk >= 80 {
-		lines = append(lines, fmt.Sprintf("[WARN] Host root disk %.1f%% used", disk), "  Open Disk usage [d] to investigate without cleanup.")
+		lines = append(lines, fmt.Sprintf("[WARN] Root filesystem / %.1f%% used", disk))
 	}
 	if len(snapshot.Sites) == 0 {
-		lines = append(lines, "[UNKNOWN] No discovered sites; inspect source coverage in Inventory [z].")
+		lines = append(lines, "[UNKNOWN] No discovered sites")
 	}
 	type issue struct {
 		check    model.Check
@@ -59,7 +59,7 @@ func issueLines(snapshot Snapshot) []string {
 	})
 	for _, key := range keys {
 		item := grouped[key]
-		lines = append(lines, fmt.Sprintf("[%s] %s / %d domain(s)", strings.ToUpper(string(item.check.State)), item.check.Layer, len(item.affected)), "  "+console.Safe(item.check.Summary), "  Affected: "+console.Safe(strings.Join(item.affected, ", ")))
+		lines = append(lines, fmt.Sprintf("[%s] %s / %d domains", strings.ToUpper(string(item.check.State)), layerLabel(item.check.Layer), len(item.affected)), "  "+console.Safe(item.check.Summary), "  "+console.Safe(strings.Join(item.affected, ", ")), "")
 	}
 	if len(lines) == 0 {
 		return []string{"No observed exceptions in the current evidence."}

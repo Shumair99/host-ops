@@ -81,6 +81,11 @@ func readProcesses(ctx context.Context, runner platform.Runner, snapshot *discov
 	if err != nil {
 		snapshot.Sources = append(snapshot.Sources, discovery.Source{ID: "linux/listeners", ParentID: source.ID, Kind: "listeners", State: "unavailable", Mode: "active", Issue: "Listening socket inspection unavailable", ObservedAt: snapshot.ObservedAt})
 	} else {
+		if unixData, unixErr := runner.Run(ctx, "ss", "-H", "-lxnp"); unixErr == nil {
+			data = append(append(data, '\n'), unixData...)
+		} else {
+			snapshot.Sources = append(snapshot.Sources, discovery.Source{ID: "linux/unix-listeners", ParentID: source.ID, Kind: "listeners", State: "unavailable", Mode: "active", Issue: "Unix socket ownership unavailable", ObservedAt: snapshot.ObservedAt})
+		}
 		for _, line := range strings.Split(string(data), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) < 5 {

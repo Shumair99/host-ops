@@ -60,7 +60,11 @@ func readRuntime(ctx context.Context, runner platform.Runner, engine string, sna
 	out := []containerMeta{}
 	for start := 0; start < len(ids); start += 32 {
 		end := min(len(ids), start+32)
-		args := []string{"container", "inspect", "--format", discoveryInspect, "--"}
+		const selectedLabels = `{"com.docker.compose.project":{{json (index .Config.Labels "com.docker.compose.project")}},"com.docker.compose.service":{{json (index .Config.Labels "com.docker.compose.service")}},"org.opencontainers.image.revision":{{json (index .Config.Labels "org.opencontainers.image.revision")}}}`
+		// Only selected identity/routing facts leave the collector. Arbitrary
+		// labels and authentication middleware values are discarded locally.
+		format := strings.Replace(discoveryInspect, selectedLabels, `{{json .Config.Labels}}`, 1)
+		args := []string{"container", "inspect", "--format", format, "--"}
 		if engine == "podman" {
 			args = []string{"container", "inspect", "--format", "{{json .}}", "--"}
 		}
@@ -95,6 +99,7 @@ func readRuntime(ctx context.Context, runner platform.Runner, engine string, sna
 				w.Networks[engine+":"+name] = discovery.Network{IP: details.IPAddress, Aliases: details.Aliases}
 			}
 			for name, bindings := range meta.NetworkSettings.Ports {
+				w.Ports[name] = []string{}
 				for _, binding := range bindings {
 					ip := binding.HostIP
 					if ip == "" {
@@ -128,5 +133,5 @@ func proxyKind(executable, image string) string {
 }
 
 func inspectionContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(ctx, 15*time.Second)
+	return context.WithTimeout(ctx, 25*time.Second)
 }

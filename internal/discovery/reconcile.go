@@ -21,7 +21,7 @@ func Reconcile(next Snapshot, previous Registry) Registry {
 		}
 		parent, ok := current[old.ParentID]
 		old.ObservedAt = next.ObservedAt
-		if ok && (parent.State == "ready" || parent.State == "absent") {
+		if ok && old.ParentID != "linux/processes" && (parent.State == "ready" || parent.State == "absent") {
 			old.State, old.Issue = "absent", "Source no longer present in a complete parent inventory"
 		} else {
 			old.State, old.Issue = "unavailable", "Source not observed in this scan"
@@ -57,6 +57,11 @@ func Reconcile(next Snapshot, previous Registry) Registry {
 		}
 	}
 	activeProxies := map[string]bool{}
+	for _, source := range next.Sources {
+		if source.ProxyID != "" && source.State == "ready" && source.Mode == "active" {
+			activeProxies[source.ProxyID] = true
+		}
+	}
 	for _, route := range next.Routes {
 		if s := current[route.SourceID]; route.ProxyID != "" && s.State == "ready" && s.Mode == "active" {
 			activeProxies[route.ProxyID] = true
@@ -169,6 +174,12 @@ func ConcreteHost(host string) bool {
 
 func ResolveUpstream(upstream string, route Route, snapshot Snapshot) []string {
 	address := upstream
+	if strings.HasPrefix(address, "unix:") {
+		address = strings.TrimPrefix(address, "unix:")
+	}
+	if strings.HasPrefix(address, "unix/") {
+		address = strings.TrimPrefix(address, "unix/")
+	}
 	if u, err := url.Parse(address); err == nil && u.Host != "" {
 		address = u.Host
 	}
@@ -184,6 +195,9 @@ func ResolveUpstream(upstream string, route Route, snapshot Snapshot) []string {
 				if n == network {
 					shared = true
 				}
+			}
+			if len(route.Networks) == 0 && net.ParseIP(host) != nil && host == details.IP {
+				shared = true
 			}
 			if !shared {
 				continue

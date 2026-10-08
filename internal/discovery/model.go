@@ -10,6 +10,7 @@ import (
 const ProtocolVersion = 1
 
 type Source struct {
+	ProxyID    string    `json:"proxy_id,omitempty"`
 	ID         string    `json:"id"`
 	ParentID   string    `json:"parent_id,omitempty"`
 	Kind       string    `json:"kind"`

@@ -40,6 +40,7 @@ func readCaddy(ctx context.Context, runner platform.Runner, host config.Host, in
 	}
 	sort.Strings(networks)
 	active := discovery.Source{ID: "active/caddy/" + instance.workload.ID, ParentID: instance.workload.SourceID, Kind: "caddy", State: "ready", Mode: "active", ObservedAt: snapshot.ObservedAt}
+	active.ProxyID = instance.workload.ID
 	admin := "http://127.0.0.1:2019"
 	if host.CaddyAdminURL != "" && (host.CaddyContainer == "" || host.CaddyContainer == instance.container) {
 		admin = host.CaddyAdminURL

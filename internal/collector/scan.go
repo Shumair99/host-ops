@@ -35,6 +35,7 @@ func Scan(ctx context.Context, host config.Host) discovery.Snapshot {
 		}
 	}
 	seen := map[string]bool{}
+	readServices(ctx, runner, &snapshot)
 	for _, process := range readProcesses(ctx, runner, &snapshot) {
 		if !seen[process.workload.ID] {
 			proxies = append(proxies, proxyInstance{kind: process.kind, binary: process.binary, args: process.args, workload: process.workload})
@@ -45,6 +46,12 @@ func Scan(ctx context.Context, host config.Host) discovery.Snapshot {
 		switch proxy.kind {
 		case "caddy":
 			readCaddy(ctx, runner, host, proxy, &snapshot)
+		case "nginx":
+			readNginx(ctx, runner, proxy, &snapshot)
+		case "traefik":
+			readTraefik(ctx, proxy, metadata, &snapshot)
+		case "apache":
+			readApache(ctx, runner, proxy, &snapshot)
 		default:
 			snapshot.Sources = append(snapshot.Sources, discovery.Source{ID: "proxy/" + proxy.kind + "/" + proxy.workload.ID, ParentID: proxy.workload.SourceID, Kind: proxy.kind, State: "unavailable", Mode: "configured", ObservedAt: snapshot.ObservedAt, Issue: "Proxy reader is not yet available"})
 		}

@@ -55,6 +55,8 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 	frames := make(chan Message, 8)
 	wake := make(chan struct{}, 1)
 	var wg sync.WaitGroup
+	var inventoryMu sync.RWMutex
+	var latest discovery.Snapshot
 	send := func(message Message) bool {
 		message.Version, message.HostID = discovery.ProtocolVersion, c.Host.ID
 		if message.ObservedAt.IsZero() {
@@ -67,7 +69,7 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 			return false
 		}
 	}
-	wg.Add(2)
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		runner := platform.Command{Host: c.Host}
@@ -103,6 +105,9 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 		defer timer.Stop()
 		for {
 			snapshot := Scan(ctx, c.Host)
+			inventoryMu.Lock()
+			latest = snapshot
+			inventoryMu.Unlock()
 			if !send(Message{Kind: "inventory", Inventory: &snapshot, ObservedAt: snapshot.ObservedAt}) {
 				return
 			}
@@ -111,6 +116,27 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 				return
 			case <-timer.C:
 			case <-wake:
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		timer := time.NewTicker(5 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				inventoryMu.RLock()
+				snapshot := latest
+				inventoryMu.RUnlock()
+				statsCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+				samples := workloadStats(statsCtx, platform.Command{Host: c.Host}, snapshot)
+				cancel()
+				if len(samples) > 0 && !send(Message{Kind: "workload_metrics", Samples: samples}) {
+					return
+				}
 			}
 		}
 	}()

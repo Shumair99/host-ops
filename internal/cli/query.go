@@ -8,7 +8,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/Shumair99/host-ops/internal/capacity"
 	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/costs"
 	"github.com/Shumair99/host-ops/internal/logs"
 	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/model"
@@ -70,6 +72,24 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 		return 1
 	}
 	defer store.Close()
+	if command == "costs" {
+		report, err := costs.Assess(ctx, c, store)
+		if err != nil {
+			fmt.Fprintln(errOut, "Cost evidence unavailable")
+			return 1
+		}
+		encoder.Encode(report)
+		return 0
+	}
+	if command == "capacity" {
+		report, err := capacity.Assess(ctx, c, store)
+		if err != nil {
+			fmt.Fprintln(errOut, "Capacity evidence unavailable")
+			return 1
+		}
+		encoder.Encode(report)
+		return 0
+	}
 	if command == "security" || command == "orphans" {
 		reports, err := store.Latest(ctx, c.Host.ID)
 		if err != nil {

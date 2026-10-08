@@ -36,6 +36,8 @@ Commands:
   security          Inspect posture, publications and listening sockets
   orphans           Review possible stopped/unregistered resource candidates
   ownership <name>  Find the site owning a container, domain or configured port
+  costs             Explain configured cost allocation and estimated margins
+  capacity          Assess measured resource usage and history limits
 
 Options:
   --config FILE     Manifest (default: HOSTOPS_CONFIG or hostops.json)
@@ -50,7 +52,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 0
 	}
 	command := args[0]
-	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" && command != "security" && command != "orphans" && command != "ownership" {
+	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" && command != "security" && command != "orphans" && command != "ownership" && command != "costs" && command != "capacity" {
 		fmt.Fprintf(errOut, "unknown command %q\n", command)
 		return 1
 	}
@@ -96,7 +98,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
-	if command == "metrics" || command == "history" || command == "disk" || command == "events" || command == "deployments" || command == "logs" || command == "diff" || command == "incidents" || command == "readiness" || command == "security" || command == "orphans" || command == "ownership" {
+	if command == "metrics" || command == "history" || command == "disk" || command == "events" || command == "deployments" || command == "logs" || command == "diff" || command == "incidents" || command == "readiness" || command == "security" || command == "orphans" || command == "ownership" || command == "costs" || command == "capacity" {
 		return query(ctx, c, command, id, *db, *since, out, errOut)
 	}
 	if command == "sites" {

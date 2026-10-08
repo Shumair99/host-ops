@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,14 +19,22 @@ type Config struct {
 }
 
 type Host struct {
-	ID             string  `json:"id"`
-	Name           string  `json:"name"`
-	SSH            string  `json:"ssh,omitempty"`
-	IdentityFile   string  `json:"identity_file,omitempty"`
-	CaddyContainer string  `json:"caddy_container,omitempty"`
-	CaddyAdminURL  string  `json:"caddy_admin_url,omitempty"`
-	MonthlyCost    float64 `json:"monthly_cost,omitempty"`
-	Currency       string  `json:"currency,omitempty"`
+	ID                string      `json:"id"`
+	Name              string      `json:"name"`
+	SSH               string      `json:"ssh,omitempty"`
+	IdentityFile      string      `json:"identity_file,omitempty"`
+	CaddyContainer    string      `json:"caddy_container,omitempty"`
+	CaddyAdminURL     string      `json:"caddy_admin_url,omitempty"`
+	MonthlyCost       float64     `json:"monthly_cost,omitempty"`
+	MonthlyBackupCost float64     `json:"monthly_backup_cost,omitempty"`
+	CostWeights       CostWeights `json:"cost_weights,omitempty"`
+	Currency          string      `json:"currency,omitempty"`
+}
+
+type CostWeights struct {
+	Equal  float64 `json:"equal"`
+	Memory float64 `json:"memory"`
+	CPU    float64 `json:"cpu"`
 }
 
 type Site struct {
@@ -111,12 +120,29 @@ func (c *Config) Validate() error {
 	if c.Host.MonthlyCost < 0 {
 		return fmt.Errorf("host cost cannot be negative")
 	}
+	if c.Host.MonthlyBackupCost < 0 {
+		return fmt.Errorf("backup cost cannot be negative")
+	}
+	w := c.Host.CostWeights
+	sum := w.Equal + w.Memory + w.CPU
+	if w.Equal < 0 || w.Memory < 0 || w.CPU < 0 || sum != 0 && math.Abs(sum-1) > 0.000001 {
+		return fmt.Errorf("cost weights must be non-negative and total 1")
+	}
+	if c.Host.Currency != "" && !regexp.MustCompile(`^[A-Z]{3}$`).MatchString(c.Host.Currency) {
+		return fmt.Errorf("currency must be a three-letter ISO code")
+	}
+	if c.Host.MonthlyCost+c.Host.MonthlyBackupCost > 0 && c.Host.Currency == "" {
+		return fmt.Errorf("configured costs require a currency")
+	}
 	if len(c.Sites) == 0 {
 		return fmt.Errorf("manifest must register at least one site")
 	}
 	seen := map[string]bool{}
 	for i := range c.Sites {
 		s := &c.Sites[i]
+		if s.Business.MonthlyFee < 0 {
+			return fmt.Errorf("site %s: hosting fee cannot be negative", s.ID)
+		}
 		if !identifier.MatchString(s.ID) || seen[s.ID] {
 			return fmt.Errorf("invalid or duplicate site id %q", s.ID)
 		}

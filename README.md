@@ -1,33 +1,44 @@
 # Amadeus HostOps
 
-A self-hosted operations platform that understands production websites across the whole chain: source, deployment, runtime, proxy, DNS and HTTPS.
+A terminal-only operations desk for production websites. The interactive dashboard uses ASCII borders, health symbols and resource bars inside PowerShell, CMD or a Linux terminal. It observes runtime, local HTTP, Caddy, DNS, TLS and public HTTP, and keeps history in SQLite.
 
-HostOps observes existing Docker/Caddy infrastructure. It does not replace deployments, add itself to the website request path or automatically repair production.
+There is no browser frontend, management HTTP server, listening dashboard port or access token. Your existing deployments keep responsibility for changing production. HostOps inspections are read-only.
 
-Machine-specific manifests and inspection evidence belong in the ignored `local/` directory. Examples use fictional sites. Never add credentials, environment values, raw container inspections or backups to Git.
+## Try the offline demonstration
 
-## Run locally
+The Windows binaries are built under `bin/`. Open PowerShell:
 
-Requires Go 1.26+ and Node 22.12+ (or a current supported Node release).
-
-```sh
-go build -o bin/hostops ./cmd/hostops
-go build -o bin/hostops-agent ./cmd/hostops-agent
-cd web
-npm ci
-npm run build
-cd ..
-bin/hostops sites --config examples/sites/docker.json
+```powershell
+cd C:\path\to\host-ops
+.\bin\hostops.exe dashboard --demo
 ```
 
-Create your own ignored `local/hostops.json`, set a random `HOSTOPS_TOKEN` with at least 32 characters, then run:
+In CMD, use `cd /d C:\path\to\host-ops` and `bin\hostops.exe dashboard --demo`. The demo needs no manifest, SSH, Docker, internet connection or token. It uses fictional sites in an isolated in-memory database. Press `s` for Sites, choose with arrows and press Enter. Press `t` to simulate an outage, `n` to inspect the incident, and `t` again to simulate recovery. Press `d` for illustrative disk accounting and `q` to exit.
 
-```sh
-bin/hostops-agent --config local/hostops.json --db local/hostops.db
+## Inspect your infrastructure
+
+With the ignored `local/hostops.json` manifest configured:
+
+```powershell
+.\bin\hostops.exe dashboard --config local/hostops.json
 ```
 
-Open http://127.0.0.1:9090 and enter the token. Use `host.ssh` to inspect a remote Linux host without installing HostOps there. See [security](docs/security.md), [diagnostics](docs/diagnostics.md), [monitoring](docs/monitoring.md) and the [isolated Docker demo](demo/README.md).
+Running `hostops` without a command also opens the dashboard. It collects automatically every 60 seconds using your existing SSH identity and known_hosts; no installation on the VPS is required. The standalone collector is optional. `scripts/dev.ps1` opens the same live dashboard, and `scripts/dev.ps1 -Demo` opens the offline demo.
 
-On Windows, `./scripts/check.ps1` builds and checks the project, and `./scripts/dev.ps1` starts the local workspace. The dashboard's Host page can inspect application directories and Docker disk usage on demand. Configure `host.disk_roots` for another directory layout. No cleanup runs automatically.
+Use a terminal at least 60 columns by 16 rows; 100 by 30 or larger shows more evidence. Tab changes views, arrows scroll, Space reloads a view, F5 collects fresh observations, and `?` shows help. Missing and stale observations stay explicit.
 
-Readiness, recovery evidence, exposure, cost allocation, capacity, maintenance preflight and dependency impact are available in both the CLI and dashboard. [Incident capsules](docs/incidents.md) capture redacted evidence for investigation. Missing costs, backup verification and independent monitoring remain unknown until real evidence is supplied.
+Read the [terminal guide and walkthrough](docs/terminal-guide.md) for the full demo, live use and keyboard map. One-shot commands also produce readable text; add `--json` for scripts:
+
+```powershell
+.\bin\hostops.exe doctor --config local/hostops.json
+.\bin\hostops.exe disk --config local/hostops.json
+.\bin\hostops.exe dashboard --demo --once
+```
+
+## Build and development
+
+Building requires Go 1.26 or newer. Node/npm are not required. On Windows, `scripts/check.ps1` runs tests, vet and builds the three executables. See [security boundaries](docs/security.md), and the optional [isolated Docker lab](demo/README.md).
+
+Readiness, recovery, security/exposure, cost allocation, capacity, preflight, dependency impact, deployment records and incident capsules remain available through the terminal. Evidence enters through `hostops record`, described in the [deployment](docs/deployments.md), [recovery](docs/recovery.md) and [watcher](docs/watcher.md) guides. HostOps does not execute repairs, maintenance or restores.
+
+Machine-specific manifests, history and inspection evidence belong in ignored `local/`. Keep credentials, private keys, environment values and raw runtime dumps out of Git.

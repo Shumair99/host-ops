@@ -2,7 +2,7 @@
 
 The agent records health, HTTP latency, host CPU/memory/swap/load/uptime/root-disk metrics and Docker CPU/memory/network counters. Missing metrics are explicitly listed. Host CPU is calculated from two `/proc/stat` samples; it is a point-in-time observation, not a long-term average. Docker CPU may exceed 100% on multicore hosts.
 
-Recent raw samples are retained for 90 days; the last observation for each host/site/kind is retained. Deployment, incident and recovery evidence is not covered by telemetry retention. There is no downsampling yet. Query endpoints are bounded to 1,000 records and return their observation times.
+Recent raw samples are retained for 90 days; the last observation for each host/site/kind is retained. Deployment, incident and recovery evidence is not covered by telemetry retention. There is no downsampling yet. Historical queries are bounded to 1,000 records and return their observation times. The terminal dashboard runs the collector automatically; `hostops-agent` can continue collection separately while the dashboard is closed.
 
 ```sh
 hostops metrics --config local/hostops.json

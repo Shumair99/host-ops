@@ -60,7 +60,7 @@ Options:
   --file FILE       Evidence JSON; use - for standard input
   --demo            Offline fictional dashboard; no network access
   --once            Print one dashboard frame and exit
-  --no-collect      Dashboard reads existing history without collecting
+  --no-collect      Disable automatic cycles; inspection views still read live
   --interval VALUE  Dashboard collection interval (default 60s)
   --page VIEW       Initial dashboard view, e.g. disk or readiness
 

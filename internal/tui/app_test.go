@@ -181,6 +181,23 @@ func TestDashboardRejectsUnknownViewBeforeCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+func TestStaleEvidenceCannotShowPassingLayerSymbols(t *testing.T) {
+	m := testDashboard(t)
+	m.source.Demo = false
+	m.source.MaxAge = time.Nanosecond
+	snapshot, err := m.source.Base(m.ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, report := range snapshot.Reports {
+		if report.Overall != "unknown" || strings.Contains(chain(report), "+") {
+			t.Fatal("stale health presented as passed", report)
+		}
+	}
+	if len(snapshot.Host.Values) != 0 {
+		t.Fatal("stale host measurements presented as current")
+	}
+}
 func TestOfflineDemoEveryViewAvoidsRealInspection(t *testing.T) {
 	m := testDashboard(t)
 	for _, item := range menu {

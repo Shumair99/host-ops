@@ -200,7 +200,7 @@ func (m dashboard) frame() string {
 	if m.source.Demo {
 		mode = "DEMO / FICTIONAL DATA - NO NETWORK"
 	} else if m.noCollect {
-		mode = "HISTORY ONLY / NO COLLECTION"
+		mode = "AUTO COLLECTION OFF / MANUAL READS"
 	}
 	state := "IDLE"
 	if m.collecting {

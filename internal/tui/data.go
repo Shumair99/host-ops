@@ -68,6 +68,12 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 		if !ok {
 			r = model.Report{HostID: site.HostID, SiteID: site.ID, Name: site.Name, Overall: "unknown", Checks: []model.Check{{Layer: "collector", State: model.Unknown, Summary: "No observations yet"}}}
 		} else if !s.Demo && time.Since(r.ObservedAt) > age {
+			for i := range r.Checks {
+				if r.Checks[i].State != model.Skip {
+					r.Checks[i].State = model.Unknown
+					r.Checks[i].Summary = "Stale observation: " + r.Checks[i].Summary
+				}
+			}
 			r.Checks = append(r.Checks, model.Check{Layer: "collector", State: model.Unknown, Summary: "Observations are stale"})
 			r.Overall = model.Overall(r.Checks)
 		}

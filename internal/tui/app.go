@@ -361,7 +361,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.source.Demo {
 				m.notice = "DEMO: use t to simulate an outage or recovery."
 			} else if m.noCollect {
-				m.notice = "History-only mode; collection is disabled."
+				m.notice = "Automatic collection is off; Space reloads this view."
 			} else if !m.collecting {
 				m.collecting = true
 				m.notice = "Collecting fresh read-only observations..."

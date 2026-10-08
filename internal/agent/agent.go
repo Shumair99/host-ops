@@ -10,6 +10,7 @@ import (
 	"github.com/Shumair99/host-ops/api"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/health"
+	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
 	"github.com/Shumair99/host-ops/internal/storage"
@@ -24,7 +25,22 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
 		}
 		reports = append(reports, health.Collect(ctx, c, site, runner))
 	}
-	return store.Reports(ctx, c.Host.ID, reports)
+	if err := store.Reports(ctx, c.Host.ID, reports); err != nil {
+		return err
+	}
+	metricsCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	host := metrics.Host(metricsCtx, runner, c.Host)
+	if _, err := store.Add(ctx, c.Host.ID, "", "host_metrics", host.ObservedAt, host); err != nil {
+		return err
+	}
+	for _, site := range c.Sites {
+		m := metrics.Container(metricsCtx, runner, site)
+		if _, err := store.Add(ctx, c.Host.ID, site.ID, "metrics", m.ObservedAt, m); err != nil {
+			return err
+		}
+	}
+	return store.Retain(ctx, 90*24*time.Hour)
 }
 
 func Run(ctx context.Context, c config.Config, store *storage.Store, address, token string, interval time.Duration) error {

@@ -24,6 +24,9 @@ Commands:
   sites             List registered production properties
   status [site]     Inspect runtime health
   doctor [site]     Explain cross-layer observations with evidence
+  metrics [site]    Collect current host or container metrics
+  history [site]    Query SQLite health history (--db, --since)
+  disk              Inspect disk directories and Docker usage without deleting
 
 Options:
   --config FILE     Manifest (default: HOSTOPS_CONFIG or hostops.json)
@@ -38,7 +41,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 0
 	}
 	command := args[0]
-	if command != "sites" && command != "status" && command != "doctor" {
+	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" {
 		fmt.Fprintf(errOut, "unknown command %q\n", command)
 		return 1
 	}
@@ -50,6 +53,8 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	path := flags.String("config", defaultPath, "site manifest")
 	asJSON := flags.Bool("json", false, "JSON output")
+	db := flags.String("db", "local/hostops.db", "history database")
+	since := flags.String("since", "24h", "history window")
 	id := ""
 	flagArgs := append([]string(nil), args[1:]...)
 	if len(flagArgs) > 0 && !strings.HasPrefix(flagArgs[0], "-") {
@@ -78,6 +83,9 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
+	if command == "metrics" || command == "history" || command == "disk" {
+		return query(ctx, c, command, id, *db, *since, out, errOut)
+	}
 	if command == "sites" {
 		if *asJSON {
 			if encoder.Encode(sites) != nil {

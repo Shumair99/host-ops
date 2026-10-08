@@ -46,6 +46,25 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/sites/{site}", s.site)
 	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "health") })
+	mux.HandleFunc("GET /api/metrics", func(w http.ResponseWriter, r *http.Request) {
+		kind := "metrics"
+		if r.URL.Query().Get("site") == "" {
+			kind = "host_metrics"
+		}
+		s.records(w, r, kind)
+	})
+	mux.HandleFunc("GET /api/host", func(w http.ResponseWriter, r *http.Request) {
+		records, err := s.Store.Query(r.Context(), s.Config.Host.ID, "", "host_metrics", time.Time{}, 1)
+		if err != nil {
+			Error(w, 500, "Host metrics unavailable")
+			return
+		}
+		if len(records) == 0 {
+			JSON(w, 200, nil)
+			return
+		}
+		JSON(w, 200, records[0].Data)
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")

@@ -14,6 +14,9 @@ import (
 )
 
 type Store struct{ DB *sql.DB }
+
+const timestampLayout = "2006-01-02T15:04:05.000000000Z"
+
 type Record struct {
 	ID         int64           `json:"id"`
 	HostID     string          `json:"host_id"`
@@ -63,7 +66,7 @@ func (s *Store) Add(ctx context.Context, host, site, kind string, at time.Time, 
 	if err != nil {
 		return 0, err
 	}
-	result, err := s.DB.ExecContext(ctx, "INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES(?,?,?,?,?)", host, site, kind, at.UTC().Format(time.RFC3339Nano), string(data))
+	result, err := s.DB.ExecContext(ctx, "INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES(?,?,?,?,?)", host, site, kind, at.UTC().Format(timestampLayout), string(data))
 	if err != nil {
 		return 0, err
 	}
@@ -84,7 +87,7 @@ func (s *Store) Reports(ctx context.Context, host string, reports []model.Report
 		if err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES(?,?,?,?,?)", host, r.SiteID, "health", r.ObservedAt.UTC().Format(time.RFC3339Nano), string(data)); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES(?,?,?,?,?)", host, r.SiteID, "health", r.ObservedAt.UTC().Format(timestampLayout), string(data)); err != nil {
 			return err
 		}
 	}
@@ -116,7 +119,7 @@ func (s *Store) Query(ctx context.Context, host, site, kind string, since time.T
 	if limit < 1 || limit > 1000 {
 		limit = 1000
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,host_id,site_id,kind,observed_at,data FROM records WHERE host_id=? AND (?='' OR site_id=?) AND (?='' OR kind=?) AND observed_at>=? ORDER BY id DESC LIMIT ?`, host, site, site, kind, kind, since.UTC().Format(time.RFC3339Nano), limit)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,host_id,site_id,kind,observed_at,data FROM records WHERE host_id=? AND (?='' OR site_id=?) AND (?='' OR kind=?) AND observed_at>=? ORDER BY id DESC LIMIT ?`, host, site, site, kind, kind, since.UTC().Format(timestampLayout), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -136,4 +139,9 @@ func (s *Store) Query(ctx context.Context, host, site, kind string, since time.T
 		records = append(records, r)
 	}
 	return records, rows.Err()
+}
+
+func (s *Store) Retain(ctx context.Context, age time.Duration) error {
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM records WHERE kind IN ('health','metrics','host_metrics','snapshot') AND observed_at<? AND id NOT IN (SELECT max(id) FROM records GROUP BY host_id,site_id,kind)`, time.Now().Add(-age).UTC().Format(timestampLayout))
+	return err
 }

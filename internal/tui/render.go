@@ -11,24 +11,27 @@ import (
 
 type menuItem struct{ Key, Page, Label string }
 
-var menu = []menuItem{{"o", "overview", "Overview"}, {"s", "sites", "Sites"}, {"i", "issues", "Issues"}, {"h", "host", "Host metrics"}, {"d", "disk", "Disk usage"}, {"r", "readiness", "Readiness"}, {"e", "events", "Events"}, {"g", "changes", "Changes"}, {"y", "deployments", "Deployments"}, {"n", "incidents", "Incidents"}, {"v", "monitoring", "History"}, {"m", "external", "External"}, {"u", "security", "Security"}, {"c", "costs", "Costs"}, {"p", "capacity", "Capacity"}, {"b", "recovery", "Recovery"}, {"f", "preflight", "Preflight"}, {"x", "impact", "Impact"}, {"?", "help", "Help"}}
+var menu = []menuItem{
+	{"o", "overview", "Overview"}, {"s", "sites", "Sites"}, {"i", "issues", "Issues"},
+	{"h", "host", "Host metrics"}, {"z", "inventory", "Inventory"}, {"d", "disk", "Disk usage"},
+	{"r", "readiness", "Readiness"}, {"e", "events", "Events"}, {"g", "changes", "Changes"},
+	{"y", "deployments", "Deployments"}, {"n", "incidents", "Incidents"}, {"v", "monitoring", "History"},
+	{"m", "external", "External"}, {"u", "security", "Security"}, {"c", "costs", "Costs"},
+	{"p", "capacity", "Capacity"}, {"b", "recovery", "Recovery"}, {"f", "preflight", "Preflight"},
+	{"x", "impact", "Impact"}, {"?", "help", "Help"},
+}
 
 func (m dashboard) filteredSites() []config.Site {
 	out := []config.Site{}
-	for _, s := range m.sites() {
-		if strings.Contains(strings.ToLower(s.ID+" "+s.Name+" "+s.Proxy.Domain), strings.ToLower(m.filter)) {
-			out = append(out, s)
+	for _, group := range groupSites(m.rawSites()) {
+		if group.matches(m.filter) {
+			out = append(out, group.Primary)
 		}
 	}
 	return out
 }
 func (m dashboard) report(id string) model.Report {
-	for _, r := range m.snapshot.Reports {
-		if r.SiteID == id {
-			return r
-		}
-	}
-	return model.Report{Overall: "unknown"}
+	return groupReport(groupFor(m.rawSites(), id), reportsByID(m.snapshot.Reports))
 }
 func (m dashboard) liveLines() []string {
 	lines := []string{}
@@ -223,18 +226,19 @@ func (m dashboard) frame() string {
 	if m.siteID != "" {
 		title += " / " + m.siteID
 	}
-	rows = append(rows, "| "+pad("VIEWS", navWidth)+" | "+pad(title, bodyWidth)+" |")
+	menuTitle := "VIEWS"
+	if m.menuFocus {
+		menuTitle += " [FOCUS]"
+	} else {
+		title += " [FOCUS]"
+	}
+	rows = append(rows, "| "+pad(menuTitle, navWidth)+" | "+pad(title, bodyWidth)+" |")
 	content := wrap(m.liveLines(), bodyWidth)
 	offset := min(m.offset, max(0, len(content)-bodyHeight))
 	if m.page == "sites" {
 		offset = min(max(0, m.selected-bodyHeight+4), max(0, len(content)-bodyHeight))
 	}
-	active := 0
-	for i, item := range menu {
-		if item.Page == m.page {
-			active = i
-		}
-	}
+	active := m.navSelected
 	navStart := max(0, min(active-bodyHeight/2, len(menu)-bodyHeight))
 	for row := 0; row < bodyHeight; row++ {
 		left := ""
@@ -242,8 +246,10 @@ func (m dashboard) frame() string {
 		if index < len(menu) {
 			item := menu[index]
 			cursor := " "
-			if item.Page == m.page {
+			if m.menuFocus && index == m.navSelected {
 				cursor = ">"
+			} else if item.Page == m.page {
+				cursor = "*"
 			}
 			left = cursor + "[" + item.Key + "] " + item.Label
 		}
@@ -261,10 +267,12 @@ func (m dashboard) frame() string {
 		notice = "Collection failed; check SSH/manifest. Previous evidence remains."
 	}
 	if notice == "" {
-		notice = fmt.Sprintf("%d-%d of %d lines | Tab views | arrows scroll | Space reload", min(offset+1, len(content)), min(offset+bodyHeight, len(content)), len(content))
+		if m.menuFocus {
+			notice = "Menu: Up/Down select | Right/Enter open | letter jumps to view"
+		} else {
+			notice = fmt.Sprintf("%d-%d of %d lines | Up/Down scroll | Left menu | Space refresh", min(offset+1, len(content)), min(offset+bodyHeight, len(content)), len(content))
+		}
 	}
-	rows = append(rows, line(notice), line("F5 collect | Enter inspect site | ? help | q quit"), border)
+	rows = append(rows, line(notice), line("Tab switch pane | F5 collect | Enter inspect site | ? help | q quit"), border)
 	return strings.Join(rows, "\n")
 }
-
-func init() { menu = append(menu, menuItem{"z", "inventory", "Inventory"}) }

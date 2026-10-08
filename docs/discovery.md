@@ -32,7 +32,7 @@ Linux local mode uses the same collector/protocol when `host.ssh` is omitted. Wi
 
 Sources retain kind, time, availability, active/configured mode and explanation. Workloads retain stable IDs, instance IDs, Compose identity where present, state, selected image/revision/restart facts, network addresses/aliases, ports and mounts. Listening sockets connect host addresses or Unix sockets to services/processes. Routes retain host/path matchers, upstreams, static roots, redirects, proxy identity and source identity.
 
-A site is a concrete observed host name on this VPS. `example.com` and `www.example.com` are separate entries and can share a backend. Domain counts are not counts of independent applications. Path routes and multiple backends stay in the graph. Bare containers, database services and arbitrary directories do not become websites merely because they exist.
+A site is a concrete observed host name on this VPS. `example.com` and `www.example.com` retain separate registry entries and independent health checks, and can share a backend. Overview and Sites group those observed pairs into one row, reflecting the worst health across both; the inspector shows each domain's checks. Other subdomains and standalone `www` domains remain separate. Domain counts are not counts of independent applications. Path routes and multiple backends stay in the graph. Bare containers, database services and arbitrary directories do not become websites merely because they exist.
 
 Site IDs derive from host identity plus domain. Named container/Compose workload IDs survive container replacement. Replicas remain separate workload nodes. Processes outside systemd use process identity and may change IDs on restart. Systemd services are deduplicated against process observations.
 
@@ -51,7 +51,7 @@ Wildcard, regex and catch-all matchers stay in Patterns/Coverage. The system can
 | Reader | Observations | Important limits |
 | --- | --- | --- |
 | Linux | OS/architecture, `/proc` metrics, processes, TCP/UDP/Unix listeners | Depends on permissions and available `ss`; only listening/proxy processes become workload nodes |
-| Docker | All containers, selected inspection facts, aliases, mounts, ports, five-second stats | Existing context/socket access defines visibility |
+| Docker | All containers, selected inspection facts, aliases, mounts, ports, 30-second stats | Existing context/socket access defines visibility |
 | Podman | Same normalized container and stats contract | Rootless inventory belongs to the connected user; other users' containers are outside that session |
 | systemd | Service unit state | Requires JSON-capable `systemctl`; other hosts retain process/listener evidence |
 | Caddy | Active HTTP server JSON plus declared configuration adapted by Caddy; nested host/path routes, static roots, backends, redirects | Existing API must be reachable; container reader uses `wget`, host reader `curl`; declared path comes from launch arguments |
@@ -68,14 +68,16 @@ Stats use an explicit shared template projection rather than assuming complete D
 | Observation | Default cadence |
 | --- | --- |
 | CPU, RAM, swap, load, uptime | 1 second |
-| Container metrics | 5 seconds |
+| Container metrics | 30 seconds, starting after the first inventory |
 | Inventory and root filesystem capacity | 30 seconds |
 | Public HTTP | 30 seconds, controlled by `--interval` |
 | DNS, TCP reachability and TLS | 5 minutes |
-| Resource history writes | 15 seconds |
+| Resource history writes | Host: 15 seconds; workload: each 30-second sample |
 | Directory scans / security / preflight / logs | On demand |
 
-These are sampling schedules, not hard real-time guarantees. SSH latency, command duration and permissions affect delivery. Slow public probes do not block telemetry; inventory scans do not overlap. F5 requests inventory/public checks while metrics continue. Telemetry older than five seconds stops appearing current; root disk has its own timestamp and expires if refresh fails. A disconnected collector makes retained runtime/proxy checks unknown in the live dashboard.
+The one-second counters read `/proc/stat`, `/proc/meminfo`, `/proc/uptime` and `/proc/loadavg` directly in the collector, without spawning helper commands or opening new SSH sessions. CPU uses two counters separated by a 200 ms timer; that wait does not consume CPU. Runtime statistics invoke the Docker/Podman CLI and API, so their cadence is 30 seconds. Workload state is updated by the 30-second inventory scan.
+
+These are sampling schedules, not hard real-time guarantees. SSH latency, command duration and permissions affect delivery. Slow public probes do not block telemetry; inventory scans do not overlap. F5 requests inventory/public checks while metrics continue. Host telemetry older than five seconds stops appearing current; root disk has its own timestamp and expires if refresh fails. A disconnected collector makes retained runtime/proxy checks unknown in the live dashboard.
 
 Health keeps runtime, container health, proxy route and client-side DNS/TLS/HTTP distinct. Declared proxy evidence is a warning. Independent backend HTTP is labelled not configured in automatic mode; a public response cannot replace that check. Automatic HTTP marks successful responses as passing, 4xx as warnings and 5xx as failures. An explicit expected status retains an operator-defined contract.
 

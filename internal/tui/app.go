@@ -56,20 +56,22 @@ type loadedMsg struct {
 }
 type noticeMsg string
 type dashboard struct {
-	ctx                                  context.Context
-	source                               Source
-	jobs                                 *jobs
-	interval                             time.Duration
-	width, height                        int
-	page, siteID, target, filter         string
-	selected, offset, generation         int
-	snapshot                             Snapshot
-	lines                                []string
-	loading, collecting, noCollect       bool
-	collectVersion                       int
-	notice, collectErr, inputKind, input string
-	cancelRead                           context.CancelFunc
-	demoOutage, demoBusy                 bool
+	ctx                                     context.Context
+	source                                  Source
+	jobs                                    *jobs
+	interval                                time.Duration
+	width, height                           int
+	page, siteID, target, filter            string
+	selected, offset, generation            int
+	navSelected                             int
+	menuFocus                               bool
+	snapshot                                Snapshot
+	lines                                   []string
+	loading, reading, collecting, noCollect bool
+	collectVersion                          int
+	notice, collectErr, inputKind, input    string
+	cancelRead                              context.CancelFunc
+	demoOutage, demoBusy                    bool
 }
 
 func Run(parent context.Context, c config.Config, dbPath string, opts Options, input io.Reader, out io.Writer) error {
@@ -162,7 +164,9 @@ func newDashboard(ctx context.Context, source Source, opts Options) dashboard {
 	if page == "" {
 		page = "overview"
 	}
-	return dashboard{ctx: ctx, source: source, jobs: &jobs{}, interval: opts.Interval, width: width, height: height, page: page, target: "caddy", noCollect: opts.NoCollect, loading: true, collecting: !opts.NoCollect && !opts.Demo && !opts.Once}
+	m := dashboard{ctx: ctx, source: source, jobs: &jobs{}, interval: opts.Interval, width: width, height: height, page: page, target: "caddy", noCollect: opts.NoCollect, loading: true, menuFocus: true, collecting: !opts.NoCollect && !opts.Demo && !opts.Once}
+	m.navSelected = menuIndex(page)
+	return m
 }
 func (m dashboard) Init() tea.Cmd {
 	commands := []tea.Cmd{m.readCmd(m.generation), tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })}
@@ -188,7 +192,7 @@ func (m *dashboard) reload() tea.Cmd {
 	ctx, cancel := context.WithCancel(m.ctx)
 	m.cancelRead = cancel
 	m.generation++
-	m.loading = true
+	m.reading = true
 	source, page, siteID, target, generation := m.source, m.page, m.siteID, m.target, m.generation
 	return m.jobs.command(func() tea.Msg {
 		snapshot, err := source.Base(ctx)
@@ -204,9 +208,31 @@ func (m dashboard) cycleCmd() tea.Cmd {
 }
 func (m *dashboard) goPage(page string) tea.Cmd {
 	m.page = page
+	m.navSelected = menuIndex(page)
+	m.menuFocus = false
+	m.loading = true
+	m.lines = nil
 	m.offset = 0
 	m.notice = ""
 	m.siteID = ""
+	return m.reload()
+}
+
+func menuIndex(page string) int {
+	for i, item := range menu {
+		if item.Page == page {
+			return i
+		}
+	}
+	return 1 // Property inspectors belong to Sites.
+}
+
+func (m *dashboard) inspectPage(page string) tea.Cmd {
+	m.page = page
+	m.menuFocus = false
+	m.loading = true
+	m.lines = nil
+	m.offset = 0
 	return m.reload()
 }
 func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -217,12 +243,20 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.generation != m.generation {
 			return m, nil
 		}
-		m.loading = false
+		initial := m.loading
+		m.loading, m.reading = false, false
 		if msg.err != nil {
-			m.lines = []string{"Evidence unavailable. Check configuration and access.", msg.err.Error()}
-			m.notice = "Read failed; no successful result is assumed."
+			if initial {
+				m.lines = []string{"Evidence unavailable. Check configuration and access.", msg.err.Error()}
+				m.notice = "Read failed; no successful result is assumed."
+			} else {
+				m.notice = "Refresh failed; showing previous evidence: " + msg.err.Error()
+			}
 		} else {
 			m.snapshot, m.lines = msg.snapshot, msg.lines
+			if strings.HasPrefix(m.notice, "Refresh failed; showing previous evidence:") {
+				m.notice = ""
+			}
 		}
 		m.selected = min(m.selected, max(0, len(m.filteredSites())-1))
 	case cycleMsg:
@@ -256,7 +290,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tickMsg:
 		tick := tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })
-		if !m.loading && (m.page == "overview" || m.page == "sites" || m.page == "issues" || m.page == "host" || m.page == "inventory" || m.page == "site") {
+		if !m.loading && !m.reading && (m.page == "overview" || m.page == "sites" || m.page == "issues" || m.page == "host" || m.page == "inventory" || m.page == "site") {
 			return m, tea.Batch(tick, m.reload())
 		}
 		return m, tick
@@ -303,61 +337,82 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "q":
 			return m, tea.Quit
 		case "esc":
-			if m.siteID != "" || m.page == "site" || m.page == "logs" {
+			if !m.menuFocus && (m.siteID != "" || m.page == "site" || m.page == "logs") {
 				return m, m.goPage("sites")
 			}
-			m.filter = ""
-			m.selected = 0
-			m.offset = 0
-		case "tab", "shift+tab", "right", "left":
-			index := 0
-			for i, item := range menu {
-				if item.Page == m.page {
-					index = i
-				}
+			if !m.menuFocus && m.page == "sites" && m.filter != "" {
+				m.filter = ""
+				m.selected = 0
+				return m, nil
 			}
-			delta := 1
-			if key == "shift+tab" || key == "left" {
-				delta = -1
+			m.menuFocus = true
+			m.navSelected = menuIndex(m.page)
+		case "tab", "shift+tab":
+			m.menuFocus = !m.menuFocus
+			m.navSelected = menuIndex(m.page)
+		case "left":
+			m.menuFocus = true
+			m.navSelected = menuIndex(m.page)
+		case "right":
+			if m.menuFocus {
+				return m, m.goPage(menu[m.navSelected].Page)
 			}
-			index = (index + delta + len(menu)) % len(menu)
-			return m, m.goPage(menu[index].Page)
 		case "up", "k":
-			if m.page == "sites" {
+			if m.menuFocus {
+				m.navSelected = max(0, m.navSelected-1)
+			} else if m.page == "sites" {
 				m.selected = max(0, m.selected-1)
 			} else {
 				m.offset = max(0, m.offset-1)
 			}
 		case "down", "j":
-			if m.page == "sites" {
+			if m.menuFocus {
+				m.navSelected = min(len(menu)-1, m.navSelected+1)
+			} else if m.page == "sites" {
 				m.selected = min(max(0, len(m.filteredSites())-1), m.selected+1)
 			} else {
 				m.offset++
 			}
 		case "pgup":
-			m.offset = max(0, m.offset-max(1, m.height-10))
+			if m.menuFocus {
+				m.navSelected = max(0, m.navSelected-max(1, m.height-10))
+			} else {
+				m.offset = max(0, m.offset-max(1, m.height-10))
+			}
 		case "pgdown":
-			m.offset += max(1, m.height-10)
+			if m.menuFocus {
+				m.navSelected = min(len(menu)-1, m.navSelected+max(1, m.height-10))
+			} else {
+				m.offset += max(1, m.height-10)
+			}
 		case "home":
-			m.offset = 0
-			m.selected = 0
+			if m.menuFocus {
+				m.navSelected = 0
+			} else {
+				m.offset = 0
+				m.selected = 0
+			}
 		case "end":
-			if m.page == "sites" {
+			if m.menuFocus {
+				m.navSelected = len(menu) - 1
+			} else if m.page == "sites" {
 				m.selected = max(0, len(m.filteredSites())-1)
 			} else {
 				m.offset = max(0, len(wrap(m.liveLines(), max(1, m.width-25)))-max(1, m.height-9))
 			}
 		case "enter":
+			if m.menuFocus {
+				return m, m.goPage(menu[m.navSelected].Page)
+			}
 			if m.page == "sites" {
 				sites := m.filteredSites()
 				if len(sites) > 0 {
 					m.siteID = sites[min(m.selected, len(sites)-1)].ID
-					m.page = "site"
-					m.offset = 0
-					return m, m.reload()
+					return m, m.inspectPage("site")
 				}
 			}
 		case "/":
+			m.menuFocus = false
 			if m.page == "sites" {
 				m.inputKind = "filter"
 				m.input = m.filter
@@ -387,22 +442,16 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = "A collection is already running."
 			}
 		case "l":
-			if m.siteID != "" {
-				m.page = "logs"
-				m.offset = 0
-				return m, m.reload()
+			if !m.menuFocus && m.siteID != "" {
+				return m, m.inspectPage("logs")
 			}
 		case "a":
-			if m.siteID != "" {
-				m.page = "readiness"
-				m.offset = 0
-				return m, m.reload()
+			if !m.menuFocus && m.siteID != "" {
+				return m, m.inspectPage("readiness")
 			}
 		case "b":
-			if m.siteID != "" {
-				m.page = "recovery"
-				m.offset = 0
-				return m, m.reload()
+			if !m.menuFocus && m.siteID != "" {
+				return m, m.inspectPage("recovery")
 			}
 			return m, m.goPage("recovery")
 		case "w":

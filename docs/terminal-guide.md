@@ -51,9 +51,9 @@ Your existing private manifest is at `local/hostops.json`. Start:
 .\scripts\dev.ps1
 ```
 
-The header now says `LIVE / READ-ONLY`. The dashboard loads retained observations and starts one streaming SSH collector. CPU/RAM update every second, container stats every five seconds, and inventory/root disk every 30 seconds. Public HTTP uses `--interval` (default 30 seconds); DNS/TLS use five minutes. The first resource sample appears automatically, without pressing a key. Closing the dashboard cancels its reads and stops its collector.
+The header now says `LIVE / READ-ONLY`. The dashboard loads retained observations and starts one streaming SSH collector. CPU/RAM update every second using direct `/proc` reads, without spawning commands for those counters. Container stats and inventory/root disk update every 30 seconds. Container stats run immediately after the first inventory, then follow that schedule. Public HTTP uses `--interval` (default 30 seconds); DNS/TLS use five minutes. The first resource sample appears automatically, without pressing a key. Background refreshes keep the current evidence visible; only opening a new inspector shows its initial loading message. Closing the dashboard cancels its reads and stops its collector.
 
-The sites list comes from discovered proxy domains. Your existing reference property's JSON entry retains its display name and health preferences; other sites appear without registration. Press `z` to inspect sources, routes and workloads. Domain aliases can be separate entries for the same application. Wildcard/catch-all routes stay visible as coverage patterns. Public checks run from this computer, while the collector reads host/runtime configuration on the VPS.
+The sites list comes from discovered proxy domains. Your existing reference property's JSON entry retains its display name and health preferences; other sites appear without registration. Overview and Sites show one row for an observed base domain and its `www` variant. That row reflects the worst health across both domains. Open the site inspector to see both addresses and their independent checks, including any `www`-only failure. Filtering by either address finds the same site. A standalone `www` domain and unrelated subdomains remain separate sites; no unobserved address is invented. Press `z` to inspect the individual source, route and workload facts. Wildcard/catch-all routes stay visible as coverage patterns. Public checks run from this computer, while the collector reads host/runtime configuration on the VPS.
 
 For another VPS, run `hostops connect user@vps` first, optionally with `--identity FILE` or `--port 2222`. It writes connection settings after a successful inspection. SSH uses your existing identity and trusted host key in batch mode. The bundled Linux collector runs from the remote user's private cache; it installs no service and needs no dashboard token. Disk, Security, Preflight and runtime log views run bounded inspections on demand. Disk scans can take longer than history reads; switch views or quit while they run. See [discovery support and limitations](discovery.md).
 
@@ -63,24 +63,27 @@ The live root disk was measured at 88% used during verification. Open `d` to ins
 
 | Key | Action |
 | --- | --- |
-| Tab / Shift+Tab; Left / Right | Next / previous view |
+| Up / Down; `j` / `k` in menu | Select a view without opening it |
+| Right / Enter in menu | Open the selected view and focus its content |
+| Left | Return focus to the Views menu |
+| Tab / Shift+Tab | Switch focus between menu and content |
 | View letter shown in menu | Jump directly to that view |
-| Up / Down; `j` / `k` | Scroll; on Sites, select a property |
-| PageUp / PageDown; Home / End | Scroll longer evidence |
-| Enter on Sites | Inspect selected property |
+| Up / Down; `j` / `k` in content | Scroll; on Sites, select a property |
+| PageUp / PageDown; Home / End | Move through the focused menu or evidence |
+| Enter in Sites content | Inspect selected property |
 | `/` on Sites | Filter by name, ID or domain |
 | `/` on Impact | Change resource being assessed |
 | Space | Reload the current view |
 | F5 | Request inventory refresh and public checks |
 | `z` | Inventory, source coverage, routes and workloads |
 | `l`, `a`, `b` from property | Logs, site readiness, site recovery |
-| Esc | Return from property/logs; cancel input or clear site filter |
+| Esc | Return from an inspector to Sites; cancel input, clear site filter or focus menu |
 | `w` on Incidents | Export newest listed incident capsule |
 | `t` in demo | Toggle fictional outage/recovery |
 | `?` | Help |
 | `q` / Ctrl+C | Quit and restore terminal |
 
-Views: `o` Overview, `s` Sites, `i` Issues, `h` Host metrics, `z` Inventory, `d` Disk, `r` Readiness, `e` Events, `g` Changes, `y` Deployments, `n` Incidents, `v` History, `m` External watcher checks, `u` Security, `c` Costs, `p` Capacity, `b` Recovery, `f` reboot Preflight, `x` Impact. The menu scrolls to keep the active view visible.
+Views: `o` Overview, `s` Sites, `i` Issues, `h` Host metrics, `z` Inventory, `d` Disk, `r` Readiness, `e` Events, `g` Changes, `y` Deployments, `n` Incidents, `v` History, `m` External watcher checks, `u` Security, `c` Costs, `p` Capacity, `b` Recovery, `f` reboot Preflight, `x` Impact. The menu scrolls to keep its selected view visible. `>` marks the menu cursor, `*` marks the open view, and `[FOCUS]` identifies the pane receiving navigation keys. View-letter shortcuts open their content directly.
 
 ## Optional background collector and plain commands
 

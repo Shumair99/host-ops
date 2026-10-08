@@ -57,6 +57,8 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 	var wg sync.WaitGroup
 	var inventoryMu sync.RWMutex
 	var latest discovery.Snapshot
+	inventoryReady := make(chan struct{})
+	var firstInventory sync.Once
 	send := func(message Message) bool {
 		message.Version, message.HostID = discovery.ProtocolVersion, c.Host.ID
 		if message.ObservedAt.IsZero() {
@@ -78,7 +80,7 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 		disk := map[string]float64{}
 		lastDisk := time.Time{}
 		for {
-			sample := metrics.HostFast(ctx, runner, c.Host)
+			sample := metrics.HostFast(ctx, hostFiles{}, c.Host)
 			if time.Since(lastDisk) >= 30*time.Second {
 				values := metrics.RootDisk(ctx, runner)
 				if len(values) > 0 {
@@ -116,6 +118,7 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 			if !send(Message{Kind: "inventory", Inventory: &snapshot, ObservedAt: snapshot.ObservedAt}) {
 				return
 			}
+			firstInventory.Do(func() { close(inventoryReady) })
 			select {
 			case <-ctx.Done():
 				return
@@ -126,22 +129,27 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 	}()
 	go func() {
 		defer wg.Done()
-		timer := time.NewTicker(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			return
+		case <-inventoryReady:
+		}
+		timer := time.NewTicker(30 * time.Second)
 		defer timer.Stop()
 		for {
+			inventoryMu.RLock()
+			snapshot := latest
+			inventoryMu.RUnlock()
+			statsCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+			samples := workloadStats(statsCtx, platform.Command{Host: c.Host}, snapshot)
+			cancel()
+			if len(samples) > 0 && !send(Message{Kind: "workload_metrics", Samples: samples}) {
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-				inventoryMu.RLock()
-				snapshot := latest
-				inventoryMu.RUnlock()
-				statsCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-				samples := workloadStats(statsCtx, platform.Command{Host: c.Host}, snapshot)
-				cancel()
-				if len(samples) > 0 && !send(Message{Kind: "workload_metrics", Samples: samples}) {
-					return
-				}
 			}
 		}
 	}()

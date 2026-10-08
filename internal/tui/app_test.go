@@ -4,6 +4,7 @@ import (
 	"bytes"
 	tea "charm.land/bubbletea/v2"
 	"context"
+	"errors"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/storage"
 	"strings"
@@ -40,6 +41,12 @@ func press(m dashboard, key string) (dashboard, tea.Cmd) {
 		code = tea.KeyEscape
 	case "down":
 		code = tea.KeyDown
+	case "up":
+		code = tea.KeyUp
+	case "left":
+		code = tea.KeyLeft
+	case "right":
+		code = tea.KeyRight
 	case "tab":
 		code = tea.KeyTab
 	case "f5":
@@ -107,6 +114,88 @@ func TestSiteSelectionDrillDownAndFilter(t *testing.T) {
 		t.Fatal(m.filteredSites())
 	}
 }
+
+func TestMenuSelectsVerticallyAndOpensWithRight(t *testing.T) {
+	m := testDashboard(t)
+	if !m.menuFocus {
+		t.Fatal("dashboard did not start with menu focus")
+	}
+	m, cmd := press(m, "down")
+	if cmd != nil || m.page != "overview" || menu[m.navSelected].Page != "sites" {
+		t.Fatal("moving the menu cursor opened a view", m.page, m.navSelected)
+	}
+	m, cmd = press(m, "right")
+	m = finish(m, cmd)
+	if m.page != "sites" || m.menuFocus {
+		t.Fatal("Right did not open the selected view")
+	}
+	m, _ = press(m, "down")
+	if m.selected != 1 || menu[m.navSelected].Page != "sites" {
+		t.Fatal("content arrows moved the menu instead of selecting a site")
+	}
+	m, _ = press(m, "left")
+	m, _ = press(m, "down")
+	if !m.menuFocus || m.page != "sites" || menu[m.navSelected].Page != "issues" {
+		t.Fatal("Left did not return to menu navigation")
+	}
+	m, cmd = press(m, "enter")
+	m = finish(m, cmd)
+	if m.page != "issues" || m.menuFocus {
+		t.Fatal("Enter did not open the menu selection")
+	}
+	m, _ = press(m, "tab")
+	if !m.menuFocus || m.page != "issues" {
+		t.Fatal("Tab changed the view rather than the focused pane")
+	}
+}
+
+func TestBackgroundSiteRefreshKeepsEvidenceVisibleAndDoesNotOverlap(t *testing.T) {
+	m := testDashboard(t)
+	m.siteID = "alpha"
+	m.page = "site"
+	var err error
+	m.lines, err = m.source.Page(m.ctx, "site", "alpha", m.target, m.snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := m.frame()
+	cmd := m.reload()
+	if m.loading || !m.reading || m.frame() != before || strings.Contains(m.frame(), "Reading site evidence") {
+		t.Fatal("background refresh replaced the inspector with a loading screen")
+	}
+	generation := m.generation
+	next, _ := m.Update(tickMsg{})
+	if next.(dashboard).generation != generation {
+		t.Fatal("another background read started while one was pending")
+	}
+	m = finish(m, cmd)
+	if m.reading || m.loading || !strings.Contains(m.frame(), "SITE PASSPORT") {
+		t.Fatal("completed background refresh did not retain the inspector")
+	}
+}
+
+func TestFailedBackgroundReadPreservesEvidenceAndRecovers(t *testing.T) {
+	m := testDashboard(t)
+	m.siteID, m.page = "alpha", "site"
+	var err error
+	m.lines, err = m.source.Page(m.ctx, "site", "alpha", m.target, m.snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := strings.Join(m.lines, "\n")
+	m.reload()
+	v, _ := m.Update(loadedMsg{generation: m.generation, err: errors.New("read unavailable")})
+	m = v.(dashboard)
+	if m.reading || m.loading || strings.Join(m.lines, "\n") != before || !strings.Contains(m.notice, "showing previous evidence") {
+		t.Fatal("failed background read discarded evidence or concealed the failure")
+	}
+	cmd := m.reload()
+	m = finish(m, cmd)
+	if m.notice != "" || !strings.Contains(m.frame(), "SITE PASSPORT") {
+		t.Fatal("successful refresh retained the previous failure notice")
+	}
+}
+
 func TestStalePageResultCannotReplaceNewView(t *testing.T) {
 	m := testDashboard(t)
 	m.generation = 4

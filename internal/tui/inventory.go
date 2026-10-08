@@ -36,9 +36,17 @@ func inventoryLines(registry discovery.Registry) []string {
 	return lines
 }
 
-func (m dashboard) sites() []config.Site {
+func (m dashboard) rawSites() []config.Site {
 	if m.snapshot.Sites != nil {
 		return m.snapshot.Sites
 	}
 	return m.source.Config.Sites
+}
+
+func (m dashboard) sites() []config.Site {
+	sites := []config.Site{}
+	for _, group := range groupSites(m.rawSites()) {
+		sites = append(sites, group.Primary)
+	}
+	return sites
 }

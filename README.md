@@ -2,7 +2,7 @@
 
 A terminal operations desk that discovers websites on a Linux VPS. Connect with SSH, and HostOps combines runtime, proxy, service and socket observations into one inventory. The ASCII dashboard runs in PowerShell, CMD or a Linux terminal, with local SQLite history.
 
-CPU and RAM refresh every second, container metrics every five seconds, and inventory and root disk every 30 seconds. Sites come from observed proxy domains; you do not need to register them in JSON. Discovery coverage and unavailable sources are visible alongside the sites.
+CPU and RAM refresh every second through direct Linux kernel-file reads. Container metrics, inventory and root disk refresh every 30 seconds. Sites come from observed proxy domains; you do not need to register them in JSON. Overview and Sites combine observed base/`www` domain pairs into one row; the inspector retains each domain's independent checks. Discovery coverage and unavailable sources are visible alongside the sites.
 
 The dashboard uses your local account and existing SSH credentials. Collection leaves application and proxy configuration alone. A bundled Linux executable runs in the remote user's private cache for the duration of the SSH session; it exposes no management port. HostOps has no browser frontend or dashboard token.
 
@@ -34,7 +34,7 @@ Build or obtain the full bundle, including `collectors/linux-amd64/hostops` and 
 
 Running `hostops` without a command also opens the dashboard. One persistent SSH collector supplies live metrics and inventory while public checks run independently from your computer. The public HTTP interval defaults to 30 seconds; DNS/TLS checks run every five minutes. `scripts/dev.ps1` opens the live dashboard, and `scripts/dev.ps1 -Demo` opens the offline demo.
 
-Use a terminal at least 60 columns by 16 rows; 100 by 30 or larger shows more evidence. Press `s` for sites, `z` for inventory/source coverage, and `d` for disk investigation. Tab changes views, arrows scroll, F5 requests fresh inventory/public checks, and `?` shows help. The dashboard refreshes without keyboard input. Missing and stale observations stay explicit.
+Use a terminal at least 60 columns by 16 rows; 100 by 30 or larger shows more evidence. Up/Down selects a menu view; Right or Enter opens it. Left returns to the menu, and Tab switches focus between the two panes. In the content pane, Up/Down scrolls or selects a site, and Enter opens its inspector. Press `s` for sites, `z` for inventory/source coverage, `d` for disk investigation, F5 for fresh inventory/public checks, and `?` for help. Background refreshes preserve the displayed evidence. Missing and stale observations stay explicit.
 
 Read the [terminal guide and walkthrough](docs/terminal-guide.md) for the full demo, live use and keyboard map. One-shot commands also produce readable text; add `--json` for scripts:
 

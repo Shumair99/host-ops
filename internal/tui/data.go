@@ -170,7 +170,7 @@ func (s Source) Page(ctx context.Context, page, siteID, target string, snapshot 
 		if len(sites) == 0 {
 			return []string{"Site is no longer in the active inventory."}, nil
 		}
-		return property(sites[0], byID[siteID]), nil
+		return groupProperty(groupFor(s.Config.Sites, siteID), byID), nil
 	case "logs":
 		if s.Demo {
 			return []string{"DEMO LOGS (fictional)", "2026-10-08 GET /healthz 200", "2026-10-08 application started", "api_key=[REDACTED]"}, nil
@@ -278,12 +278,16 @@ func unknown(s string) string {
 func chain(r model.Report) string {
 	var b strings.Builder
 	for _, layer := range []string{"runtime", "local_http", "proxy_route", "dns", "tls", "public_http"} {
-		state := model.Unknown
+		state := model.Skip
+		found := false
 		for _, c := range r.Checks {
 			if c.Layer == layer {
-				state = c.State
-				break
+				state = worseState(state, c.State)
+				found = true
 			}
+		}
+		if !found {
+			state = model.Unknown
 		}
 		mark := map[model.State]string{model.Pass: "+", model.Fail: "!", model.Warn: "~", model.Unknown: "?", model.Skip: "-"}[state]
 		b.WriteString("[" + mark + "] ")
@@ -294,13 +298,14 @@ func chain(r model.Report) string {
 func HelpLines() []string {
 	return []string{
 		"AMADEUS HOSTOPS - TERMINAL OPERATIONS DESK", "",
-		"Tab / Shift+Tab: next / previous view",
-		"Menu shortcut: choose the letter shown on the left",
-		"Up/Down or j/k: scroll; on Sites, select a property",
-		"PageUp/PageDown, Home/End: scroll long evidence",
+		"Menu: Up/Down or j/k selects a view; Right or Enter opens it",
+		"Content: Up/Down scrolls; on Sites, selects a property",
+		"Left returns focus to the menu; Tab switches between panes",
+		"Menu letters jump directly to a view, e.g. o, s, i, z",
+		"PageUp/PageDown, Home/End: move within the focused pane",
 		"Enter on Sites: open property health, doctor and passport",
 		"/ on Sites: filter by name, ID or domain; Esc clears the filter",
-		"Space: reload the current view (Disk scans on demand)",
+		"Space: refresh in the background (Disk scans on demand)",
 		"F5: request inventory refresh and public checks",
 		"z: inventory sources, routes, workloads and coverage gaps",
 		"Esc: back from property; clear site filter or cancel input",
@@ -309,9 +314,10 @@ func HelpLines() []string {
 		"w on Incidents: export the newest listed incident capsule",
 		"t in DEMO: simulate an application outage / recovery",
 		"q or Ctrl+C: quit and restore the terminal", "",
-		"Automatic mode: CPU/RAM 1s, workload metrics 5s, inventory/disk 30s.",
+		"CPU/RAM 1s via direct kernel reads; workload metrics/inventory/disk 30s.",
 		"Public HTTP uses --interval (default 30s); DNS/TLS use 5 minutes.",
 		"Sites come from proxy domains; JSON site entries are optional metadata.",
+		"Base/www domains share a row; the inspector keeps separate domain checks.",
 		"The standalone collector is optional if this dashboard is running.",
 		"No access token, browser or listening management port is used.",
 		"SSH starts a bundled Linux collector in the remote user's private cache.",

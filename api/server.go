@@ -55,6 +55,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sites", func(w http.ResponseWriter, r *http.Request) { JSON(w, 200, s.Config.Sites) })
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("GET /api/sites/{site}", s.site)
+	mux.HandleFunc("GET /api/sites/{site}/readiness", s.readiness)
+	mux.HandleFunc("GET /api/readiness", s.readiness)
 	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "health") })
 	mux.HandleFunc("GET /api/metrics", func(w http.ResponseWriter, r *http.Request) {
 		kind := "metrics"

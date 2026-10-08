@@ -11,7 +11,9 @@ import (
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/logs"
 	"github.com/Shumair99/host-ops/internal/metrics"
+	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
+	"github.com/Shumair99/host-ops/internal/readiness"
 	"github.com/Shumair99/host-ops/internal/storage"
 )
 
@@ -63,6 +65,29 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 		return 1
 	}
 	defer store.Close()
+	if command == "readiness" {
+		reports, err := store.Latest(ctx, c.Host.ID)
+		if err != nil {
+			fmt.Fprintln(errOut, "Health history unavailable")
+			return 1
+		}
+		byID := map[string]model.Report{}
+		for _, r := range reports {
+			byID[r.SiteID] = r
+		}
+		sites, _ := c.Select(id)
+		assessments := []readiness.Assessment{}
+		for _, s := range sites {
+			a, err := readiness.Assess(ctx, c, s, byID[s.ID], store)
+			if err != nil {
+				fmt.Fprintln(errOut, "Readiness evidence unavailable")
+				return 1
+			}
+			assessments = append(assessments, a)
+		}
+		encoder.Encode(assessments)
+		return 0
+	}
 	kind := "health"
 	if command == "events" {
 		kind = "event"

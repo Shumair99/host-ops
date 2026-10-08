@@ -1,0 +1,155 @@
+package readiness
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/model"
+	"github.com/Shumair99/host-ops/internal/storage"
+)
+
+type Rule struct {
+	ID            string      `json:"id"`
+	Category      string      `json:"category"`
+	Title         string      `json:"title"`
+	State         model.State `json:"state"`
+	Points        int         `json:"points"`
+	MaxPoints     int         `json:"max_points"`
+	Evidence      string      `json:"evidence"`
+	Investigation string      `json:"investigation"`
+	Priority      int         `json:"priority"`
+}
+type Assessment struct {
+	HostID      string    `json:"host_id"`
+	SiteID      string    `json:"site_id"`
+	Name        string    `json:"name"`
+	ObservedAt  time.Time `json:"observed_at"`
+	Score       int       `json:"score"`
+	MaxScore    int       `json:"max_score"`
+	Provisional bool      `json:"provisional"`
+	Rules       []Rule    `json:"rules"`
+}
+type Evidence struct{ External, Metrics, History, Backup, Restore, Rollback bool }
+
+func Evaluate(site config.Site, r model.Report, ev Evidence, now time.Time) Assessment {
+	a := Assessment{HostID: site.HostID, SiteID: site.ID, Name: site.Name, ObservedAt: now.UTC(), MaxScore: 100, Rules: []Rule{}}
+	states := map[string]model.Check{}
+	fresh := !r.ObservedAt.IsZero() && now.Sub(r.ObservedAt) < 3*time.Minute
+	for _, check := range r.Checks {
+		states[check.Layer] = check
+	}
+	add := func(id, category, title string, state model.State, max int, evidence, investigation string, priority int) {
+		points := 0
+		if state == model.Pass {
+			points = max
+		}
+		if state == model.Unknown {
+			a.Provisional = true
+		}
+		a.Score += points
+		a.Rules = append(a.Rules, Rule{ID: id, Category: category, Title: title, State: state, Points: points, MaxPoints: max, Evidence: evidence, Investigation: investigation, Priority: priority})
+	}
+	check := func(id, category, title, layer string, max int) {
+		c, ok := states[layer]
+		if !ok || !fresh {
+			c.State = model.Unknown
+			c.Summary = "Fresh observation unavailable"
+		}
+		add(id, category, title, c.State, max, c.Summary, "Inspect this health layer and its supporting evidence.", 1)
+	}
+	check("public_http", "Availability", "Public website responds", "public_http", 10)
+	check("proxy", "Availability", "Expected proxy route loaded", "proxy_route", 5)
+	check("runtime", "Availability", "Application runtime available", "runtime", 5)
+	known := func(value bool) model.State {
+		if value {
+			return model.Pass
+		}
+		return model.Unknown
+	}
+	add("revision", "Deployment safety", "Running revision labelled", known(r.Runtime.Commit != "" && fresh), 5, "OCI revision label: "+r.Runtime.Commit, "Label images with the source commit during existing builds.", 2)
+	add("image", "Deployment safety", "Runtime image traceable", known(r.Runtime.ImageID != "" && fresh), 5, r.Runtime.Image, "Keep versioned image references in the deployment workflow.", 2)
+	restart := model.Unknown
+	if fresh && r.Runtime.Status != "" {
+		restart = model.Fail
+		if r.Runtime.RestartPolicy == "always" || r.Runtime.RestartPolicy == "unless-stopped" || site.Runtime.Type == "systemd" && r.Runtime.RestartPolicy != "no" {
+			restart = model.Pass
+		}
+	}
+	add("restart", "Deployment safety", "Restart policy configured", restart, 5, r.Runtime.RestartPolicy, "Review automatic startup and recovery behaviour.", 1)
+	add("rollback", "Deployment safety", "Previous working release retained", known(ev.Rollback), 5, "Retained image verification required", "Verify a previous known-working image still exists before relying on rollback.", 2)
+	add("backup", "Recovery", "Recent backup evidence", known(ev.Backup), 10, "Backup freshness must be verified separately from restore capability", "Record a successful backup within the configured RPO.", 1)
+	add("restore", "Recovery", "Recent restore verification", known(ev.Restore), 10, "A backup is not proof of a successful restore", "Record an isolated restoration and health verification.", 1)
+	security := func(value bool) model.State {
+		if !fresh || site.Runtime.Type != "docker" || r.Runtime.Status == "" {
+			return model.Unknown
+		}
+		if value {
+			return model.Pass
+		}
+		return model.Fail
+	}
+	add("user", "Security", "Non-root configured user", security(r.Runtime.User != "" && r.Runtime.User != "root" && r.Runtime.User != "0"), 5, "Configured user: "+r.Runtime.User, "Review the image's configured runtime user.", 2)
+	add("privileged", "Security", "Container not privileged", security(!r.Runtime.Privileged), 5, "Docker privileged flag observed", "Remove unnecessary privileged execution after reviewing dependencies.", 1)
+	add("memory_limit", "Security", "Memory limit configured", security(r.Runtime.MemoryLimit > 0), 5, "Docker memory limit observed", "Set a suitable memory limit through the existing Compose configuration.", 2)
+	check("tls", "Security", "TLS verified", "tls", 5)
+	check("local_http", "Observability", "Local application health", "local_http", 5)
+	add("external", "Observability", "Independent watcher evidence", known(ev.External), 5, "Fresh externally reported health sample required", "Run the watcher on a separate machine and forward observations.", 2)
+	add("metrics", "Observability", "Resource metrics retained", known(ev.Metrics), 5, "Stored resource samples required", "Run periodic collection and verify that metrics are available.", 2)
+	add("history", "Observability", "Health history retained", known(ev.History), 5, "At least two stored observations required", "Retain periodic health history rather than only current state.", 2)
+	return a
+}
+
+func Assess(ctx context.Context, c config.Config, site config.Site, r model.Report, store *storage.Store) (Assessment, error) {
+	ev := Evidence{}
+	query := func(kind string, since time.Time, limit int) ([]storage.Record, error) {
+		return store.Query(ctx, c.Host.ID, site.ID, kind, since, limit)
+	}
+	now := time.Now()
+	external, err := query("external_health", now.Add(-3*time.Minute), 1)
+	if err != nil {
+		return Assessment{}, err
+	}
+	ev.External = len(external) > 0
+	m, err := query("metrics", now.Add(-3*time.Minute), 1)
+	if err != nil {
+		return Assessment{}, err
+	}
+	if len(m) > 0 {
+		var sample struct {
+			Values map[string]float64 `json:"values"`
+		}
+		if json.Unmarshal(m[0].Data, &sample) == nil {
+			ev.Metrics = len(sample.Values) > 0
+		}
+	}
+	h, err := query("health", time.Time{}, 2)
+	if err != nil {
+		return Assessment{}, err
+	}
+	ev.History = len(h) >= 2
+	backupWindow := 24 * time.Hour
+	if site.Recovery.RPOhours > 0 {
+		backupWindow = time.Duration(site.Recovery.RPOhours) * time.Hour
+	}
+	b, err := query("backup", now.Add(-backupWindow), 1)
+	if err != nil {
+		return Assessment{}, err
+	}
+	if len(b) > 0 {
+		var data map[string]any
+		json.Unmarshal(b[0].Data, &data)
+		ev.Backup = data["status"] == "succeeded"
+	}
+	restores, err := query("restore", now.Add(-30*24*time.Hour), 1)
+	if err != nil {
+		return Assessment{}, err
+	}
+	if len(restores) > 0 {
+		var data map[string]any
+		json.Unmarshal(restores[0].Data, &data)
+		ev.Restore = data["status"] == "verified" && data["health_verified"] == true
+	}
+	return Evaluate(site, r, ev, now), nil
+}

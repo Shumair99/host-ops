@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -100,6 +101,7 @@ func Network(ctx context.Context, s config.Site) []model.Check {
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout())
 	defer cancel()
 	addresses, err := net.DefaultResolver.LookupHost(ctx, u.Hostname())
+	sort.Strings(addresses)
 	dns := model.Check{HostID: s.HostID, SiteID: s.ID, Layer: "dns", State: model.Pass, Summary: strings.Join(addresses, ", ")}
 	if err != nil || len(addresses) == 0 {
 		dns.State = model.Fail

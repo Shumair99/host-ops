@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/model"
@@ -70,6 +71,7 @@ func Upstreams(data []byte, domain string) ([]string, bool, error) {
 	for u := range seen {
 		upstreams = append(upstreams, u)
 	}
+	sort.Strings(upstreams)
 	return upstreams, found, nil
 }
 

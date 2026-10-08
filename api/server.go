@@ -70,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 		JSON(w, 200, records[0].Data)
 	})
 	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "event") })
+	mux.HandleFunc("GET /api/changes", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "change") })
 	mux.HandleFunc("GET /api/deployments", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "deployment") })
 	mux.HandleFunc("POST /api/deployments", s.deployment)
 	mux.HandleFunc("GET /api/sites/{site}/logs", func(w http.ResponseWriter, r *http.Request) {

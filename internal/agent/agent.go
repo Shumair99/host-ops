@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Shumair99/host-ops/api"
+	"github.com/Shumair99/host-ops/internal/changes"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/events"
 	"github.com/Shumair99/host-ops/internal/health"
@@ -34,6 +35,9 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
 		return err
 	}
 	if err := events.Record(ctx, store, previous, reports); err != nil {
+		return err
+	}
+	if err := changes.Record(ctx, store, reports); err != nil {
 		return err
 	}
 	metricsCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

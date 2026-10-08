@@ -88,7 +88,7 @@ func (m dashboard) resourcePanels(w int) []string {
 		}
 		rows := []string{t.strong(percent(n), c) + "  " + t.paint("used", muted), t.meter(n, inside, c), t.paint(detail, muted)}
 		rows = append(rows, m.spark(s.key, inside, c)...)
-		rows = append(rows, t.paint("Trend / relative scale", muted))
+		rows = append(rows, t.paint(overviewTrendLabel(inside), muted))
 		cards = append(cards, t.panel(s.label, rows, sizes[i]))
 	}
 	return columns(columns(cards[0], cards[1], sizes[0], sizes[1]), cards[2], sizes[0]+sizes[1]+1, sizes[2])
@@ -101,111 +101,60 @@ func (m dashboard) byteValue(key string) string {
 }
 func (m dashboard) bytePair(a, b string) string { return m.byteValue(a) + " / " + m.byteValue(b) }
 func (m dashboard) spark(key string, width, color int) []string {
-	samples := m.snapshot.History
-	if len(samples) < 2 {
-		return []string{m.theme.paint("Awaiting history", muted), ""}
-	}
-	buckets, gaps := relativeBuckets(samples, key, width)
-	peak := 0.0
+	buckets := recentBuckets(m.snapshot.History, key, width, time.Now())
 	count := 0
 	for _, v := range buckets {
 		if v != nil {
-			peak = max(peak, *v)
 			count++
 		}
 	}
 	if count == 0 {
-		return []string{m.theme.paint("No measured values", muted), ""}
+		return []string{m.theme.paint("No samples in last 30m", muted), ""}
 	}
-	rows := barPlot(buckets, 2, peak)
+	rows := barPlot(buckets, 4, 100)
 	for i := range rows {
 		// A half block is a clear, font-safe base level for measured zero use.
 		rows[i] = strings.ReplaceAll(rows[i], "_", "▄")
-		if i == 0 || i == len(rows)-1 {
-			line := []rune(rows[i])
-			for x, gap := range gaps {
-				if gap {
-					line[x] = '|'
-				}
-			}
-			rows[i] = string(line)
-		}
 		rows[i] = m.theme.paint(rows[i], color)
 	}
 	return rows
 }
 
-// relativeBuckets keeps Overview cards focused on the sequence of recent
-// samples. Long collection outages get one visible separator instead of
-// consuming most of a short sparkline. Host history retains actual time scale.
-func relativeBuckets(samples []metrics.Sample, key string, width int) ([]*float64, []bool) {
-	width = max(1, width)
-	buckets, gaps := make([]*float64, width), make([]bool, width)
-	if len(samples) == 0 {
-		return buckets, gaps
-	}
-	deltas := make([]time.Duration, 0, len(samples)-1)
-	for i := 1; i < len(samples); i++ {
-		if d := samples[i].ObservedAt.Sub(samples[i-1].ObservedAt); d > 0 {
-			deltas = append(deltas, d)
-		}
-	}
-	threshold := 45 * time.Second
-	if len(deltas) > 0 {
-		sort.Slice(deltas, func(i, j int) bool { return deltas[i] < deltas[j] })
-		threshold = max(threshold, 3*deltas[len(deltas)/2])
-	}
-	type segment struct{ start, end int }
-	segments := []segment{}
-	start := 0
-	for i := 1; i < len(samples); i++ {
-		if samples[i].ObservedAt.Sub(samples[i-1].ObservedAt) > threshold {
-			segments = append(segments, segment{start, i})
-			start = i
-		}
-	}
-	segments = append(segments, segment{start, len(samples)})
-	if len(segments) > width {
-		segments = []segment{{0, len(samples)}}
-	}
-	gapColumns := min(len(segments)-1, width-len(segments))
-	dataColumns := width - gapColumns
-	widths := make([]int, len(segments))
-	remainingColumns := dataColumns
-	remainingSamples := len(samples)
-	for i, s := range segments {
-		remainingSegments := len(segments) - i - 1
-		segmentSamples := s.end - s.start
-		segmentWidth := remainingColumns
-		if remainingSegments > 0 {
-			segmentWidth = int(math.Round(float64(remainingColumns) * float64(segmentSamples) / float64(remainingSamples)))
-			segmentWidth = max(1, min(segmentWidth, remainingColumns-remainingSegments))
-		}
-		widths[i] = segmentWidth
-		remainingColumns -= segmentWidth
-		remainingSamples -= segmentSamples
-	}
+const overviewTrendWindow = 30 * time.Minute
 
-	cursor := 0
-	for i, s := range segments {
-		segmentWidth := widths[i]
-		for j := s.start; j < s.end; j++ {
-			x := cursor
-			if s.end-s.start > 1 && segmentWidth > 1 {
-				x += int(math.Round(float64(j-s.start) / float64(s.end-s.start-1) * float64(segmentWidth-1)))
-			}
-			n := value(samples[j].Values, key)
-			if n != nil && (buckets[x] == nil || *n > *buckets[x]) {
-				buckets[x] = n
-			}
+// recentBuckets maps the current Overview window onto a fixed timeline.
+// Missing samples stay blank, and every resource uses its real 0-100% scale.
+func recentBuckets(samples []metrics.Sample, key string, width int, now time.Time) []*float64 {
+	width = max(1, width)
+	buckets := make([]*float64, width)
+	newest := make([]time.Time, width)
+	start := now.Add(-overviewTrendWindow)
+	for _, sample := range samples {
+		if sample.ObservedAt.Before(start) || sample.ObservedAt.After(now) {
+			continue
 		}
-		cursor += segmentWidth
-		if i < len(segments)-1 && cursor < width {
-			gaps[cursor] = true
-			cursor++
+		n := value(sample.Values, key)
+		if n == nil {
+			continue
+		}
+		x := int(float64(sample.ObservedAt.Sub(start)) / float64(overviewTrendWindow) * float64(width))
+		x = min(width-1, max(0, x))
+		if buckets[x] == nil || sample.ObservedAt.After(newest[x]) {
+			buckets[x] = n
+			newest[x] = sample.ObservedAt
 		}
 	}
-	return buckets, gaps
+	return buckets
+}
+
+func overviewTrendLabel(width int) string {
+	if width >= 24 {
+		return "30m 0-100% blank=no data"
+	}
+	if width >= 13 {
+		return "30m / 0-100%"
+	}
+	return "30m"
 }
 
 // Full and half blocks are supported by Consolas, Lucida Console and Cascadia

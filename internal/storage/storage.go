@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS records (id INTEGER PRIMARY KEY, host_id TEXT NOT NUL
 CREATE INDEX IF NOT EXISTS records_lookup ON records(host_id,kind,site_id,id DESC);
 CREATE INDEX IF NOT EXISTS records_time ON records(observed_at);
 CREATE TABLE IF NOT EXISTS dedup (host_id TEXT NOT NULL, kind TEXT NOT NULL, event_key TEXT NOT NULL, PRIMARY KEY(host_id,kind,event_key));
+CREATE TABLE IF NOT EXISTS leases (host_id TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(host_id,kind));
 CREATE TABLE IF NOT EXISTS state (host_id TEXT NOT NULL, site_id TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(host_id,site_id,kind)); PRAGMA user_version=1;`)
 	if err != nil {
 		db.Close()

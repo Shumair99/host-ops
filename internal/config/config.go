@@ -41,6 +41,7 @@ type Host struct {
 	CostWeights       CostWeights `json:"cost_weights,omitempty"`
 	Currency          string      `json:"currency,omitempty"`
 	DiskRoots         []string    `json:"disk_roots,omitempty"`
+	DiskScanDisabled  bool        `json:"disk_scan_disabled,omitempty"`
 }
 
 // Billing selects one explicit source. Secrets remain in the named environment

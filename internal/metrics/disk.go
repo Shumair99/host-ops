@@ -1,68 +1,56 @@
 package metrics
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
-	"sort"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/discovery"
 	"github.com/Shumair99/host-ops/internal/platform"
 )
 
 type DiskEntry struct {
-	Path    string `json:"path"`
-	Bytes   int64  `json:"bytes"`
-	Partial bool   `json:"partial"`
+	Path        string `json:"path"`
+	Parent      string `json:"parent,omitempty"`
+	Bytes       int64  `json:"bytes"`
+	Partial     bool   `json:"partial"`
+	GrowthBytes *int64 `json:"growth_bytes,omitempty"`
+}
+type Filesystem struct {
+	Mount          string `json:"mount"`
+	Type           string `json:"type"`
+	TotalBytes     int64  `json:"total_bytes"`
+	UsedBytes      int64  `json:"used_bytes"`
+	AvailableBytes int64  `json:"available_bytes"`
+	Inodes         int64  `json:"inodes"`
+	InodesUsed     int64  `json:"inodes_used"`
+}
+type SiteStorage struct {
+	SiteID          string   `json:"site_id"`
+	Name            string   `json:"name"`
+	Paths           []string `json:"paths"`
+	DirectoryBytes  *int64   `json:"directory_bytes,omitempty"`
+	WritableBytes   *int64   `json:"writable_bytes,omitempty"`
+	WritablePartial bool     `json:"writable_partial,omitempty"`
+	Shared          bool     `json:"shared"`
+	Partial         bool     `json:"partial"`
 }
 type DiskReport struct {
-	HostID      string              `json:"host_id"`
-	ObservedAt  time.Time           `json:"observed_at"`
-	Directories []DiskEntry         `json:"directories"`
-	Docker      []map[string]string `json:"docker"`
-	Unavailable []string            `json:"unavailable"`
+	HostID          string              `json:"host_id"`
+	ObservedAt      time.Time           `json:"observed_at"`
+	Directories     []DiskEntry         `json:"directories"`
+	Docker          []map[string]string `json:"docker"`
+	Unavailable     []string            `json:"unavailable"`
+	CompletedAt     time.Time           `json:"completed_at,omitempty"`
+	DurationSeconds float64             `json:"duration_seconds,omitempty"`
+	Roots           []string            `json:"roots,omitempty"`
+	Filesystems     []Filesystem        `json:"filesystems,omitempty"`
+	Sites           []SiteStorage       `json:"sites,omitempty"`
 }
 
 func Disk(ctx context.Context, runner platform.Runner, h config.Host) DiskReport {
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
-	r := DiskReport{HostID: h.ID, ObservedAt: time.Now().UTC(), Directories: []DiskEntry{}, Docker: []map[string]string{}, Unavailable: []string{}}
-	roots := h.DiskRoots
-	if len(roots) == 0 {
-		roots = []string{"/"}
-	}
-	for _, root := range roots {
-		data, err := runner.Run(ctx, "du", "-x", "-B1", "--max-depth=1", "--", root)
-		if err != nil {
-			r.Unavailable = append(r.Unavailable, root+": permission denied, unavailable or timed out")
-		}
-		partial := err != nil
-		scanner := bufio.NewScanner(strings.NewReader(string(data)))
-		for scanner.Scan() {
-			size, path, ok := strings.Cut(scanner.Text(), "\t")
-			if !ok {
-				continue
-			}
-			bytes, err := strconv.ParseInt(size, 10, 64)
-			if err == nil {
-				r.Directories = append(r.Directories, DiskEntry{Path: path, Bytes: bytes, Partial: partial})
-			}
-		}
-	}
-	data, err := runner.Run(ctx, "docker", "system", "df", "--format", "{{json .}}")
-	if err != nil {
-		r.Unavailable = append(r.Unavailable, "Docker disk accounting")
-	} else {
-		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-			var fields map[string]string
-			if json.Unmarshal([]byte(line), &fields) == nil {
-				r.Docker = append(r.Docker, fields)
-			}
-		}
-	}
-	sort.Slice(r.Directories, func(i, j int) bool { return r.Directories[i].Bytes > r.Directories[j].Bytes })
-	return r
+	return DiskWithInventory(ctx, runner, h, discovery.Registry{}, nil)
+}
+func DiskWithInventory(ctx context.Context, runner platform.Runner, h config.Host, inventory discovery.Registry, sites []config.Site) DiskReport {
+	return inspectDisk(ctx, runner, h, inventory, sites)
 }

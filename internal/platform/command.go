@@ -37,7 +37,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 
 func (r Command) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	includeStderr := (name == "docker" || name == "podman") && len(args) > 0 && args[0] == "logs"
-	partialAccounting := name == "du"
+	partialAccounting := name == "du" || (name == "timeout" && len(args) > 4 && args[4] == "du")
 	if r.Host.SSH != "" {
 		parts := []string{Quote(name)}
 		for _, arg := range args {
@@ -57,12 +57,12 @@ func (r Command) Run(ctx context.Context, name string, args ...string) ([]byte, 
 	var stdout, stderr boundedBuffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
+		if partialAccounting {
+			return stdout.data, fmt.Errorf("directory accounting incomplete")
+		}
 		// Do not echo arbitrary command stderr: it can contain application secrets.
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("inspection timed out or was cancelled")
-		}
-		if partialAccounting && !stdout.overflow {
-			return stdout.data, fmt.Errorf("directory accounting incomplete")
 		}
 		return nil, fmt.Errorf("inspection command failed (%s)", err)
 	}
@@ -70,6 +70,9 @@ func (r Command) Run(ctx context.Context, name string, args ...string) ([]byte, 
 		stdout.Write(stderr.data)
 	}
 	if stdout.overflow || (includeStderr && stderr.overflow) {
+		if partialAccounting {
+			return stdout.data, fmt.Errorf("directory accounting output truncated")
+		}
 		return nil, fmt.Errorf("inspection output exceeded 4 MiB")
 	}
 	return stdout.data, nil

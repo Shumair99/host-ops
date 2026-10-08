@@ -20,12 +20,12 @@ The demo header says `DEMO / FICTIONAL DATA`. Its CPU, disk, prices, sites, tren
 
 ## A five-minute walkthrough
 
-1. On Overview, read the colored CPU, Memory and Root disk meters. The fictional disk is 88% used to demonstrate a capacity warning. The property table uses named health columns; wider terminals show all six checks.
+1. On Overview, read the colored CPU, Memory and Root disk meters. The fictional disk is 88% used to demonstrate a capacity warning. The property table budgets space for named health columns and always surfaces failed checks.
 2. Press `s`. Use Down to select Example Bravo and Enter to open its property view. Scroll to see individual checks, doctor evidence and the Site Passport. Press `l` for fictional logs, then Esc to return to Sites.
 3. Press `t`. The demo stops Bravo's fictional application and supplies the three confirmed failure observations needed to open an incident. DNS, TLS and proxy routing still pass; runtime, local HTTP and public HTTP fail. This is a scenario simulation, not a container stop.
 4. Press `n`. Read the `[OPEN]` incident, symptoms, confidence and investigation. Press `w` if you want a redacted JSON capsule under `local/capsules/`. Review that file before sharing.
 5. Press `t` again. The demo supplies two recovery observations. The same incident becomes `[RESOLVED]`; its original outage symptoms remain as historical evidence. Press `o` to see Bravo healthy again.
-6. Press `d` for illustrative directory and Docker storage accounting. Parent/child totals overlap. `>=` means an incomplete lower bound. This view never cleans anything up.
+6. Press `d` for illustrative directory, property and Docker storage accounting. Right focuses the tree; Up/Down selects a directory, Enter opens it and Backspace returns to its parent. Parent/child totals overlap. `>=` means an incomplete lower bound. This view never cleans anything up.
 7. Try `r` for readiness, `b` for recovery, `p` for capacity, or `x` for dependency impact. On Impact, `/` lets you enter a configured resource such as `caddy` or `alpha`.
 8. Press `q` to return to your shell.
 
@@ -59,7 +59,7 @@ The header now says `LIVE / READ-ONLY`. The dashboard loads retained observation
 
 The sites list comes from discovered proxy domains. Your existing reference property's JSON entry retains its display name and health preferences; other sites appear without registration. Overview and Sites show one row for an observed base domain and its `www` variant. That row reflects the worst health across both domains. Open the site inspector to see both addresses and their independent checks, including any `www`-only failure. Filtering by either address finds the same site. A standalone `www` domain and unrelated subdomains remain separate sites; no unobserved address is invented. Press `z` to inspect the individual source, route and workload facts. Wildcard/catch-all routes stay visible as coverage patterns. Public checks run from this computer, while the collector reads host/runtime configuration on the VPS.
 
-For another VPS, run `hostops connect user@vps` first, optionally with `--identity FILE` or `--port 2222`. It writes connection settings after a successful inspection. SSH uses your existing identity and trusted host key in batch mode. The bundled Linux collector runs from the remote user's private cache; it installs no service and needs no dashboard token. Disk, Security, Preflight and runtime log views run bounded inspections on demand. Disk scans can take longer than history reads; switch views or quit while they run. See [discovery support and limitations](discovery.md).
+For another VPS, run `hostops connect user@vps` first, optionally with `--identity FILE` or `--port 2222`. It writes connection settings after a successful inspection. SSH uses your existing identity and trusted host key in batch mode. The bundled Linux collector runs from the remote user's private cache; it installs no service and needs no dashboard token. A missing or old Disk index is scanned in the background after discovery and cached for 30 minutes. Security, Preflight and runtime log views run bounded inspections on demand. You can switch views or quit during a storage scan. See [discovery support and limitations](discovery.md) and [storage scope, overhead and controls](storage.md).
 
 The live root disk was measured at 88% used during verification. Open `d` to inspect directory sizes and Docker storage. Figures marked incomplete are lower bounds, not full totals. HostOps supplies evidence for a later cleanup decision; no keyboard shortcut deletes files or prunes Docker.
 
@@ -75,10 +75,12 @@ The live root disk was measured at 88% used during verification. Open `d` to ins
 | Up / Down; `j` / `k` in content | Scroll; on Sites, select a property |
 | PageUp / PageDown; Home / End | Move through the focused menu or evidence |
 | Enter in Sites content | Inspect selected property |
+| Enter / Right in Disk content | Open selected cached directory |
+| Backspace in Disk content | Return to parent directory |
 | `a` outside a site inspector | Open optional Tools; Up/Down selects and Enter opens a tool |
 | `/` on Sites | Filter by name, ID or domain |
 | `/` on Impact | Change resource being assessed |
-| Space | Reload the current view |
+| Space | Reload the current view; Disk requests a background scan |
 | F5 | Request inventory refresh and public checks |
 | `z` | Inventory, source coverage, routes and workloads |
 | `l`, `a`, `b` from property | Logs, site readiness, site recovery |
@@ -88,7 +90,7 @@ The live root disk was measured at 88% used during verification. Open `d` to ins
 | `?` | Help |
 | `q` / Ctrl+C | Quit and restore terminal |
 
-Main views: `o` Overview, `s` Sites, `i` Issues, `h` Host metrics, `z` Inventory, `d` Disk, `e` Timeline, `n` Incidents, `v` Health log, `a` Tools, `?` Help. `>` marks the menu cursor, `*` marks the displayed view while content has focus, and `[FOCUS]` identifies the pane receiving navigation keys. Browsing switches the right pane immediately. Disk previews show current root capacity or the previous inspection; entering starts its first scan and Space requests another. This prevents repeated directory scans while browsing.
+Main views: `o` Overview, `s` Sites, `i` Issues, `h` Host metrics, `z` Inventory, `d` Disk, `e` Timeline, `n` Incidents, `v` Health log, `a` Tools, `?` Help. The highlighted menu row identifies the view; the arrow by VIEWS indicates pane focus. Browsing switches the right pane immediately. Disk reads its retained directory index, so entering it or opening a directory launches no additional scan. Space requests another background inspection.
 
 Tools contains Security (`u`), Capacity (`p`), Impact (`x`), Readiness (`r`), Recovery (`b`), Preflight (`f`), Changes (`g`), Deployments (`y`), External watcher (`m`), and Costs/setup (`c`). Their letters remain direct shortcuts. Logs, site readiness and recovery are also available inside each site inspector. Cold Security/Preflight inspections run only when explicitly opened, and retained results stay visible on subsequent visits. Costs show setup instructions until there is billing evidence, and omit fee/margin columns until client fees are configured. See [billing setup](economics.md).
 
@@ -100,7 +102,7 @@ If you want history to continue while the dashboard is closed, run the headless 
 .\bin\hostops-agent.exe --config local/hostops.json --db local/hostops.db --interval 30s
 ```
 
-Then open the dashboard against the same database with `--no-collect`. That uses the agent's inventory and metrics; inspection views can still run manual reads. Use one active collector per database to avoid duplicate samples. The collector stops with Ctrl+C and opens no management port.
+Then open the dashboard against the same database with `--no-collect`. That uses the agent's inventory and metrics and disables automatic Disk scans; inspection views can still run manual reads. `--no-collect --once --page disk` uses only retained storage evidence. Use one active collector per database to avoid duplicate samples. The collector stops with Ctrl+C and opens no management port.
 
 ```powershell
 .\bin\hostops.exe dashboard --config local/hostops.json --no-collect

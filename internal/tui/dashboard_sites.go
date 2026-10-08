@@ -118,17 +118,21 @@ func (m dashboard) siteDetails(s config.Site, w int, compact bool) []string {
 	group := groupFor(m.rawSites(), s.ID)
 	sample := m.snapshot.Workloads[s.ID]
 	mem := "—"
+	uptime := "—"
+	if (r.Runtime.Status == "running" || r.Runtime.Status == "active") && layerState(r, "runtime") == model.Pass {
+		uptime = runtimeAge(r.Runtime)
+	}
 	if n := value(sample.Values, "memory_used_bytes"); n != nil {
 		mem = console.Bytes(*n)
 	}
 	rows := []string{t.badge(r.Overall) + t.paint("  report "+ageLabel(r.ObservedAt), muted)}
 	if compact {
-		rows = append(rows, clean(s.Proxy.Domain), "CPU "+percent(value(sample.Values, "cpu_percent"))+"  Memory "+mem+"  Uptime "+runtimeAge(r.Runtime), clip("Attention: "+attention(r), w-4))
+		rows = append(rows, clean(s.Proxy.Domain), "CPU "+percent(value(sample.Values, "cpu_percent"))+"  Memory "+mem+"  Uptime "+uptime, clip("Attention: "+attention(r), w-4))
 	} else {
 		for _, domain := range group.domains() {
 			rows = append(rows, clean(domain.Proxy.Domain)+" "+t.badge(domainReport(domain, reportsByID(m.snapshot.Reports)).Overall))
 		}
-		for _, field := range [][2]string{{"Runtime", s.Runtime.Type + " / " + r.Runtime.Status}, {"CPU", percent(value(sample.Values, "cpu_percent"))}, {"Memory", mem}, {"Uptime", runtimeAge(r.Runtime)}, {"Upstream", unknown(s.Proxy.Upstream)}, {"Image", unknown(r.Runtime.Image)}, {"Revision", unknown(r.Runtime.Commit)}, {"Attention", attention(r)}} {
+		for _, field := range [][2]string{{"Runtime", s.Runtime.Type + " / " + r.Runtime.Status}, {"CPU", percent(value(sample.Values, "cpu_percent"))}, {"Memory", mem}, {"Uptime", uptime}, {"Upstream", unknown(s.Proxy.Upstream)}, {"Image", unknown(r.Runtime.Image)}, {"Revision", unknown(r.Runtime.Commit)}, {"Attention", attention(r)}} {
 			rows = append(rows, clip(t.paint(pad(field[0], 10), muted)+" "+clean(field[1]), w-4))
 		}
 		rows = append(rows, t.paint("Workload sample "+ageLabel(sample.ObservedAt), muted))

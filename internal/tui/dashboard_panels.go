@@ -349,58 +349,6 @@ func (m dashboard) inspectorLines(w int) []string {
 	}
 	return append(out, m.theme.panel("SITE PASSPORT", rows, w)...)
 }
-func (m dashboard) diskLines(w int) []string {
-	t := m.theme
-	n := value(m.snapshot.Host.Values, "disk_percent")
-	rows := []string{t.meter(n, max(1, w-14), metricColor(n, cyan)) + " " + t.strong(percent(n), metricColor(n, cyan)), "Used " + m.byteValue("disk_used_bytes") + "   Free " + m.byteValue("disk_free_bytes"), t.paint("Capacity "+m.byteValue("disk_total_bytes"), muted)}
-	out := t.panel("Root filesystem", rows, w)
-	disk := m.snapshot.Disk
-	if disk == nil {
-		// Read failures still have their evidence, rather than disappearing behind an empty chart.
-		if m.notice != "" && len(m.lines) > 0 {
-			return append(out, t.panel("Inspection", m.decorate(m.lines), w)...)
-		}
-		return append(out, t.panel("Directory sizes", []string{t.paint("No inspection recorded", muted)}, w)...)
-	}
-	rows = []string{}
-	largest := float64(0)
-	for _, e := range disk.Directories {
-		largest = max(largest, float64(e.Bytes))
-	}
-	for _, e := range disk.Directories {
-		amount := console.Bytes(float64(e.Bytes))
-		if e.Partial {
-			amount = "≥ " + amount
-		}
-		pathWidth := max(10, (w-4)/2)
-		barWidth := max(3, w-4-pathWidth-14)
-		ratio := 0.0
-		if largest > 0 {
-			ratio = float64(e.Bytes) / largest * 100
-		}
-		rows = append(rows, t.paint(pad(clean(e.Path), pathWidth), ink)+" "+t.meter(&ratio, barWidth, violet)+" "+t.paint(amount, violet))
-	}
-	if len(rows) == 0 {
-		rows = append(rows, t.paint("No directory measurements", muted))
-	}
-	if len(disk.Unavailable) > 0 {
-		rows = append(rows, t.paint("Partial inspection · some totals are lower bounds", amber))
-	}
-	out = append(out, "")
-	out = append(out, t.panel("Directory sizes / "+ageLabel(disk.ObservedAt), rows, w)...)
-	rows = []string{t.paint(pad("TYPE", max(12, w-32))+" "+pad("SIZE", 10)+" RECLAIMABLE", muted)}
-	for _, d := range disk.Docker {
-		rows = append(rows, pad(clean(d["Type"]), max(12, w-32))+" "+pad(clean(d["Size"]), 10)+" "+t.paint(clean(d["Reclaimable"]), cyan))
-	}
-	if len(disk.Docker) == 0 {
-		rows = append(rows, t.paint("No Docker accounting available", muted))
-	}
-	out = append(out, t.panel("Docker storage", rows, w)...)
-	if len(disk.Unavailable) > 0 {
-		out = append(out, t.panel("Coverage", m.decorate(disk.Unavailable), w)...)
-	}
-	return out
-}
 func (m dashboard) workloadPanel(w int) []string {
 	rows := []string{m.theme.paint(pad("PROPERTY", max(12, w-32))+" "+pad("CPU", 8)+" MEMORY", muted)}
 	for _, s := range m.sites() {

@@ -10,8 +10,8 @@ import (
 type partialDiskRunner struct{}
 
 func (partialDiskRunner) Run(_ context.Context, name string, _ ...string) ([]byte, error) {
-	if name == "du" {
-		return []byte("1024\t/srv/apps/site\n2048\t/srv/apps\n"), fmt.Errorf("partial")
+	if name == "timeout" {
+		return []byte("1024\t/srv/apps/site\x002048\t/srv/apps\x00"), fmt.Errorf("partial")
 	}
 	return []byte(`{"Type":"Build Cache","Size":"6GB","Reclaimable":"4GB"}`), nil
 }

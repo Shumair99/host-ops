@@ -102,8 +102,12 @@ func TestDiskKeepsCachedAccountingAndPartialMeaning(t *testing.T) {
 	m.page = "disk"
 	m.width = 120
 	text := ansi.Strip(strings.Join(m.liveLines(), "\n"))
-	if !strings.Contains(text, "≥") || !strings.Contains(text, "Build Cache") || !strings.Contains(text, "/var/log") || strings.Contains(text, "Browsing the menu") {
+	if !strings.Contains(text, "≥") || !strings.Contains(text, "Build Cache") || !strings.Contains(text, "Directory explorer") || strings.Contains(text, "Browsing the menu") {
 		t.Fatal("disk facts or partial meaning were lost", text)
+	}
+	m.diskPath = "/var"
+	if !strings.Contains(strings.Join(m.liveLines(), "\n"), "log (fictional)") {
+		t.Fatal("retained child directories disappeared")
 	}
 }
 

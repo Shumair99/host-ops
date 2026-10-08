@@ -182,7 +182,7 @@ func TestMenuPreviewDoesNotRunDiskInspectionAndReusesEvidence(t *testing.T) {
 	m.source.Demo = false
 	index := menuIndex("disk")
 	cmd := m.previewMenu(index)
-	if cmd != nil || m.page != "disk" || !m.menuFocus || !strings.Contains(m.frame(), "Directory sizes") || strings.Contains(m.frame(), "Browsing the menu") {
+	if cmd != nil || m.page != "disk" || !m.menuFocus || !strings.Contains(m.frame(), "Storage inspection") || strings.Contains(m.frame(), "Browsing the menu") {
 		t.Fatal("browsing Disk started a remote scan or failed to preview it")
 	}
 	m, cmd = press(m, "right")

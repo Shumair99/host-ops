@@ -34,13 +34,13 @@ Build or obtain the full bundle, including `collectors/linux-amd64/hostops` and 
 
 Running `hostops` without a command also opens the dashboard. One persistent SSH collector supplies live metrics and inventory while public checks run independently from your computer. The public HTTP interval defaults to 30 seconds; DNS/TLS checks run every five minutes. `scripts/dev.ps1` opens the live dashboard, and `scripts/dev.ps1 -Demo` opens the offline demo.
 
-Use a terminal at least 60 columns by 16 rows; 100 by 30 or larger shows more evidence. Up/Down in the menu previews each view immediately; Right or Enter moves focus into its content. Left returns to the menu, and Tab switches pane focus. In content, Up/Down scrolls or selects a site, and Enter opens its inspector. The main menu prioritizes monitoring; `a` opens optional Tools. Timeline combines health transitions, changes and deployments, while Health history summarizes observations. Background refreshes preserve displayed evidence. Browsing past Disk shows capacity and retained results; entering the view starts its first directory inspection.
+Use a terminal at least 60 columns by 16 rows; 120 by 36 or larger shows more evidence. Up/Down in the menu previews each view immediately; Right or Enter focuses content. Left returns to the menu, and Tab switches pane focus. Sites combines a workload list with selected-property details; Enter opens the full inspector. Timeline and recent activity combine transitions, changes, deployments and incidents. A missing or old storage index is inspected automatically in the background and cached for 30 minutes. Disk's directory navigation uses that cache; Space requests another bounded scan. See [automatic storage inspection](docs/storage.md) for controls, ownership and measured overhead.
 
 Costs are optional. `hostops billing` connects a Hetzner server or Hostinger subscription through API reads, or stores an explicit manual budget. Tokens stay in environment variables; estimates show their source and exclude expenses the reader cannot establish. Self-hosted machines can leave cost tracking disabled. See [billing setup](docs/economics.md).
 
 Read the [terminal guide and walkthrough](docs/terminal-guide.md) for the full demo, live use and keyboard map. One-shot commands also produce readable text; add `--json` for scripts:
 
-Windows Terminal with PowerShell is recommended. At 120 columns, Overview shows three resource cards and all six health columns; smaller windows use compact panels. Press `?` for instructions. Interactive colors are automatic; `NO_COLOR` or `--color never` disables them. `--once` omits color unless `--color always` is requested.
+Windows Terminal with PowerShell is recommended. At 120 columns, Overview shows three resource cards and named checks within the available width; failures remain visible even when their columns do not fit. Smaller windows use compact panels. Press `?` for instructions. Interactive colors are automatic; `NO_COLOR` or `--color never` disables them. `--once` omits color unless `--color always` is requested.
 
 ```powershell
 .\bin\hostops.exe doctor --config local/hostops.json

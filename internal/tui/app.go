@@ -8,11 +8,13 @@ import (
 	"github.com/Shumair99/host-ops/internal/agent"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/incidents"
+	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/storage"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/term"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -50,6 +52,11 @@ func (j *jobs) close() { j.mu.Lock(); j.closing = true; j.mu.Unlock(); j.wg.Wait
 type tickMsg struct{}
 type collectTickMsg struct{ version int }
 type cycleMsg struct{ err error }
+type diskMsg struct {
+	report *metrics.DiskReport
+	scan   agent.DiskScan
+	err    error
+}
 type loadedMsg struct {
 	generation int
 	snapshot   Snapshot
@@ -77,6 +84,9 @@ type dashboard struct {
 	detailCache                             map[string]any
 	theme                                   theme
 	telemetryReading                        bool
+	diskReading                             bool
+	diskPath                                string
+	diskSelected                            int
 	snapshot                                Snapshot
 	lines                                   []string
 	loading, reading, collecting, noCollect bool
@@ -151,6 +161,15 @@ func Run(parent context.Context, c config.Config, dbPath string, opts Options, i
 			return err
 		}
 		m.lines, err = m.source.Evidence(ctx, m.page, "", m.target, &m.snapshot)
+		if opts.Page == "disk" && !opts.NoCollect && !opts.Demo {
+			if _, err = agent.InspectDisk(ctx, c, store, true); err != nil {
+				return err
+			}
+			m.snapshot, err = m.source.Base(ctx)
+			if err != nil {
+				return err
+			}
+		}
 		if err != nil {
 			return err
 		}
@@ -309,6 +328,18 @@ func (m *dashboard) inspectPage(page string) tea.Cmd {
 }
 func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
+	case diskMsg:
+		m.diskReading = false
+		if msg.err == nil {
+			if msg.report != nil && (m.snapshot.Disk == nil || !msg.report.ObservedAt.Before(m.snapshot.Disk.ObservedAt)) {
+				m.snapshot.Disk = msg.report
+			}
+			if !msg.scan.StartedAt.Before(m.snapshot.DiskScan.StartedAt) {
+				m.snapshot.DiskScan = msg.scan
+			}
+		} else if m.ctx.Err() == nil {
+			m.notice = "Storage inspection failed; retained results remain visible."
+		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case loadedMsg:
@@ -380,18 +411,23 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tickMsg:
 		tick := tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })
+		commands := []tea.Cmd{tick}
+		if !m.noCollect && !m.source.Demo && !m.source.Config.Host.DiskScanDisabled && !m.diskReading && (!m.source.Live || !m.snapshot.Inventory.Snapshot.ObservedAt.IsZero()) && agent.DiskDue(m.snapshot.Disk, m.snapshot.DiskScan, time.Now()) {
+			m.diskReading = true
+			commands = append(commands, m.diskCmd(false))
+		}
 		if m.page == "disk" && !m.telemetryReading {
 			m.telemetryReading = true
 			source, ctx, generation := m.source, m.ctx, m.generation
-			return m, tea.Batch(tick, m.jobs.command(func() tea.Msg {
+			return m, tea.Batch(append(commands, m.jobs.command(func() tea.Msg {
 				snapshot, err := source.Base(ctx)
 				return telemetryMsg{generation: generation, snapshot: snapshot, err: err}
-			}))
+			}))...)
 		}
 		if !m.loading && !m.reading && (m.page == "overview" || m.page == "sites" || m.page == "issues" || m.page == "host" || m.page == "inventory" || m.page == "site") {
-			return m, tea.Batch(tick, m.reload())
+			return m, tea.Batch(append(commands, m.reload())...)
 		}
-		return m, tick
+		return m, tea.Batch(commands...)
 	case noticeMsg:
 		m.notice = string(msg)
 	case tea.KeyPressMsg:
@@ -458,6 +494,10 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.menuFocus {
 				return m, m.focusContent()
 			}
+			if m.page == "disk" {
+				m.openDiskDirectory()
+				return m, nil
+			}
 		case "up", "k":
 			if m.menuFocus {
 				return m, m.previewMenu(max(0, m.navSelected-1))
@@ -465,6 +505,8 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.toolSelected = max(0, m.toolSelected-1)
 			} else if m.page == "sites" {
 				m.selected = max(0, m.selected-1)
+			} else if m.page == "disk" {
+				m.diskSelected = max(0, m.diskSelected-1)
 			} else {
 				m.offset = max(0, m.offset-1)
 			}
@@ -475,6 +517,8 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.toolSelected = min(len(toolMenu)-1, m.toolSelected+1)
 			} else if m.page == "sites" {
 				m.selected = min(max(0, len(m.filteredSites())-1), m.selected+1)
+			} else if m.page == "disk" {
+				m.diskSelected = min(max(0, len(m.diskChildren())-1), m.diskSelected+1)
 			} else {
 				m.offset++
 			}
@@ -517,6 +561,10 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if m.menuFocus {
 				return m, m.focusContent()
 			}
+			if m.page == "disk" {
+				m.openDiskDirectory()
+				return m, nil
+			}
 			if m.page == "tools" {
 				return m, m.goPage(toolMenu[m.toolSelected].Page)
 			}
@@ -538,7 +586,19 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "space":
 			m.notice = ""
+			if m.page == "disk" && !m.source.Demo {
+				if !m.diskReading {
+					m.diskReading = true
+					return m, m.diskCmd(true)
+				}
+				return m, nil
+			}
 			return m, m.reload()
+		case "backspace":
+			if m.page == "disk" && !m.menuFocus {
+				m.diskPath = path.Dir(m.currentDiskPath())
+				m.diskSelected, m.offset = 0, 0
+			}
 		case "f5":
 			if m.source.Live {
 				select {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/Shumair99/host-ops/internal/agent"
 	"github.com/Shumair99/host-ops/internal/capacity"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/costs"
@@ -54,7 +55,18 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 		return 0
 	}
 	if command == "disk" {
-		encoder.Encode(metrics.Disk(ctx, platform.Command{Host: c.Host}, c.Host))
+		store, err := storage.Open(db)
+		if err != nil {
+			fmt.Fprintln(errOut, "Disk history unavailable")
+			return 1
+		}
+		defer store.Close()
+		report, err := agent.InspectDisk(ctx, c, store, true)
+		if err != nil {
+			fmt.Fprintln(errOut, "Disk inspection unavailable")
+			return 1
+		}
+		encoder.Encode(report)
 		return 0
 	}
 	if command == "metrics" {

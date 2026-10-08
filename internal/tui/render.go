@@ -218,6 +218,8 @@ func (m dashboard) keyBar() string {
 	switch m.page {
 	case "sites":
 		return "↑↓ site   Enter inspect   / filter   ← views"
+	case "disk":
+		return "↑↓ dir   Enter open   Backspace parent   PgDn scroll   Space rescan   ← views"
 	case "site":
 		return "↑↓ scroll   l logs   a readiness   b recovery   Esc back"
 	case "tools":

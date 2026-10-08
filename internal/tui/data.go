@@ -33,6 +33,7 @@ type Snapshot struct {
 	History    []metrics.Sample
 	Workloads  map[string]metrics.Sample
 	Disk       *metrics.DiskReport
+	DiskScan   agent.DiskScan
 	Detail     any
 	Events     []storage.Record
 	LoadedAt   time.Time
@@ -167,13 +168,9 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 			snapshot.Workloads[record.SiteID] = sample
 		}
 	}
-	if data, err := s.Store.State(ctx, s.Config.Host.ID, "", "disk_inspection"); err != nil {
+	snapshot.Disk, snapshot.DiskScan, err = agent.DiskState(ctx, s.Store, s.Config.Host.ID)
+	if err != nil {
 		return Snapshot{}, err
-	} else if len(data) > 0 {
-		var disk metrics.DiskReport
-		if json.Unmarshal(data, &disk) == nil {
-			snapshot.Disk = &disk
-		}
 	}
 	snapshot.Events, err = s.activity(ctx, "", 12)
 	return snapshot, err
@@ -231,14 +228,7 @@ func (s Source) Evidence(ctx context.Context, page, siteID, target string, snaps
 			snapshot.Disk = &disk
 			return console.Format("disk", disk), nil
 		}
-		disk := metrics.Disk(ctx, runner, s.Config.Host)
-		snapshot.Disk = &disk
-		if s.Store != nil {
-			if err := s.Store.Transition(ctx, s.Config.Host.ID, "", "disk_inspection", disk, "", disk.ObservedAt, nil); err != nil {
-				return nil, err
-			}
-		}
-		return console.Format("disk", disk), nil
+		return nil, nil // The dedicated background inspection owns scanning.
 	case "readiness":
 		out := []readiness.Assessment{}
 		for _, site := range sites {
@@ -390,7 +380,7 @@ func HelpLines() []string {
 		"w on Incidents: export the newest listed incident capsule",
 		"t in DEMO: simulate an application outage / recovery",
 		"q or Ctrl+C: quit and restore the terminal", "",
-		"CPU/RAM 1s via direct kernel reads; workload metrics/inventory/disk 30s.",
+		"CPU/RAM 1s via direct kernel reads; workload metrics/inventory/disk capacity 30s.",
 		"Public HTTP uses --interval (default 30s); DNS/TLS use 5 minutes.",
 		"Sites come from proxy domains; JSON site entries are optional metadata.",
 		"Base/www domains share a row; the inspector keeps separate domain checks.",
@@ -411,6 +401,13 @@ func HelpLines() []string {
 		"Directory bars compare sizes to the largest row, not summed filesystem use.",
 		"Directory rows may overlap; >= totals are lower bounds from partial scans.",
 		"Saved Disk accounting remains available across dashboard restarts.",
+		"Storage inspection starts automatically in the background; cached results refresh after 30m.",
+		"Directory walks use lower CPU priority, a 45s limit, depth 8 and a 4096-directory index.",
+		"Disk: arrows select directories, Enter/Right opens, Backspace goes up, PgDn scrolls.",
+		"Space on Disk requests a new scan; one scan per host/history database runs at a time.",
+		"File contents are not read by storage scans; paths, sizes and ownership are stored locally.",
+		"Shared property storage is not additive; writable sizes exclude images, mounts and logs.",
+		"--no-collect or host.disk_scan_disabled disables automatic storage scans.",
 		"Color: --color auto|always|never; NO_COLOR disables auto color.",
 		"Windows Terminal with PowerShell is recommended for block and box glyphs.",
 		"Optional billing: hostops billing list --provider hetzner (or hostinger)",

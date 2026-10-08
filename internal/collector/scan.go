@@ -5,6 +5,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/discovery"
 	"github.com/Shumair99/host-ops/internal/platform"
+	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -56,5 +57,57 @@ func Scan(ctx context.Context, host config.Host) discovery.Snapshot {
 			snapshot.Sources = append(snapshot.Sources, discovery.Source{ID: "proxy/" + proxy.kind + "/" + proxy.workload.ID, ParentID: proxy.workload.SourceID, Kind: proxy.kind, State: "unavailable", Mode: "configured", ObservedAt: snapshot.ObservedAt, Issue: "Proxy reader is not yet available"})
 		}
 	}
+	filterWorkloads(&snapshot, host)
 	return snapshot
+}
+
+func filterWorkloads(snapshot *discovery.Snapshot, host config.Host) {
+	if host.AllServices {
+		return
+	}
+	ids, units, pids := map[string]bool{}, map[string]bool{}, map[int]bool{}
+	for _, unit := range host.ServiceUnits {
+		units[unit] = true
+	}
+	unixPaths := map[string]bool{}
+	for _, route := range snapshot.Routes {
+		ids[route.ProxyID] = true
+		for _, upstream := range route.Upstreams {
+			for _, id := range discovery.ResolveUpstream(upstream, route, *snapshot) {
+				ids[id] = true
+			}
+			unixPaths[strings.TrimPrefix(strings.TrimPrefix(upstream, "unix:"), "unix/")] = true
+		}
+	}
+	for _, listener := range snapshot.Listeners {
+		_, _, err := net.SplitHostPort(listener.Address)
+		if err == nil || unixPaths[listener.Address] {
+			units[listener.Unit] = true
+			if listener.PID > 0 {
+				pids[listener.PID] = true
+			}
+		}
+	}
+	kept := []discovery.Workload{}
+	for _, w := range snapshot.Workloads {
+		if w.Type != "systemd" && w.Type != "process" || ids[w.ID] || w.ProxyKind != "" || units[w.Name] || pids[w.PID] {
+			kept = append(kept, w)
+		}
+	}
+	snapshot.Workloads = kept
+}
+
+func rememberServices(host config.Host, snapshot discovery.Snapshot) config.Host {
+	units := map[string]bool{}
+	host.ServiceUnits = append([]string(nil), host.ServiceUnits...)
+	for _, unit := range host.ServiceUnits {
+		units[unit] = true
+	}
+	for _, w := range snapshot.Workloads {
+		if w.Type == "systemd" && !units[w.Name] {
+			host.ServiceUnits = append(host.ServiceUnits, w.Name)
+			units[w.Name] = true
+		}
+	}
+	return host
 }

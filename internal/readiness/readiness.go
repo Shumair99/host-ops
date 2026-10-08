@@ -33,12 +33,12 @@ type Assessment struct {
 	Provisional bool      `json:"provisional"`
 	Rules       []Rule    `json:"rules"`
 }
-type Evidence struct{ External, Metrics, History, Backup, Restore, Rollback bool }
+type Evidence struct{ External, Metrics, History, Backup, Restore bool }
 
 func Evaluate(site config.Site, r model.Report, ev Evidence, now time.Time) Assessment {
-	a := Assessment{HostID: site.HostID, SiteID: site.ID, Name: site.Name, ObservedAt: now.UTC(), MaxScore: 100, Rules: []Rule{}}
+	a := Assessment{HostID: site.HostID, SiteID: site.ID, Name: site.Name, ObservedAt: now.UTC(), MaxScore: 95, Rules: []Rule{}}
 	states := map[string]model.Check{}
-	fresh := !r.ObservedAt.IsZero() && now.Sub(r.ObservedAt) < 3*time.Minute
+	fresh := model.Fresh(r.ObservedAt, now, model.DefaultMaxAge)
 	for _, check := range r.Checks {
 		states[check.Layer] = check
 	}
@@ -80,7 +80,6 @@ func Evaluate(site config.Site, r model.Report, ev Evidence, now time.Time) Asse
 		}
 	}
 	add("restart", "Deployment safety", "Restart policy configured", restart, 5, r.Runtime.RestartPolicy, "Review automatic startup and recovery behaviour.", 1)
-	add("rollback", "Deployment safety", "Previous working release retained", known(ev.Rollback), 5, "Retained image verification required", "Verify a previous known-working image still exists before relying on rollback.", 2)
 	add("backup", "Recovery", "Recent backup evidence", known(ev.Backup), 10, "Backup freshness must be verified separately from restore capability", "Record a successful backup within the configured RPO.", 1)
 	add("restore", "Recovery", "Recent restore verification", known(ev.Restore), 10, "A backup is not proof of a successful restore", "Record an isolated restoration and health verification.", 1)
 	security := func(value bool) model.State {

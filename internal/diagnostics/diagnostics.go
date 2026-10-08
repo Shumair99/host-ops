@@ -25,8 +25,12 @@ func Diagnose(r model.Report) []model.Diagnosis {
 	if states["container_health"] == model.Fail && states["runtime"] == model.Pass {
 		add("Container runs but its application health check fails", "high", "application", "Inspect application logs and the configured health endpoint.", "runtime", "container_health")
 	}
-	if states["caddy"] == model.Fail {
-		add("Shared reverse proxy is not running", "high", "proxy", "Inspect Caddy runtime and logs; identify all sites sharing this proxy.", "caddy", "local_http", "public_http")
+	if states["proxy"] == model.Fail || states["caddy"] == model.Fail {
+		layer := "proxy"
+		if states["caddy"] == model.Fail {
+			layer = "caddy"
+		}
+		add("Shared reverse proxy is not running", "high", "proxy", "Inspect proxy runtime and logs; identify all sites sharing this proxy.", layer, "local_http", "public_http")
 	}
 	if states["proxy_route"] == model.Fail {
 		add("Loaded proxy configuration differs from the site manifest", "high", "proxy", "Compare the loaded domain/upstream with the protected Caddy configuration before changing it.", "proxy_route", "local_http")

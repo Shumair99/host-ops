@@ -10,14 +10,18 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/model"
 	_ "modernc.org/sqlite"
 )
 
 type Store struct {
-	DB      *sql.DB
-	stateMu sync.Mutex
-	locks   map[string]*sync.Mutex
+	DB            *sql.DB
+	stateMu       sync.Mutex
+	locks         map[string]*sync.Mutex
+	maintenanceMu sync.Mutex
+	policy        config.History
+	maintainedAt  time.Time
 }
 
 const timestampLayout = "2006-01-02T15:04:05.000000000Z"
@@ -33,7 +37,11 @@ type Record struct {
 
 func Open(path string) (*Store, error) {
 	if path != ":memory:" {
+		_, dirErr := os.Stat(filepath.Dir(path))
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return nil, err
+		}
+		if err := protectHistory(path, os.IsNotExist(dirErr)); err != nil {
 			return nil, err
 		}
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
@@ -50,20 +58,18 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	_, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
-CREATE TABLE IF NOT EXISTS records (id INTEGER PRIMARY KEY, host_id TEXT NOT NULL, site_id TEXT NOT NULL, kind TEXT NOT NULL, observed_at TEXT NOT NULL, data TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS records_lookup ON records(host_id,kind,site_id,id DESC);
-CREATE INDEX IF NOT EXISTS records_time ON records(observed_at);
-CREATE INDEX IF NOT EXISTS records_history_dedup ON records(host_id,site_id,kind,observed_at);
-CREATE TABLE IF NOT EXISTS history_imports (host_id TEXT NOT NULL, site_id TEXT NOT NULL, kind TEXT NOT NULL, observed_at TEXT NOT NULL, PRIMARY KEY(host_id,site_id,kind,observed_at));
-CREATE TABLE IF NOT EXISTS dedup (host_id TEXT NOT NULL, kind TEXT NOT NULL, event_key TEXT NOT NULL, PRIMARY KEY(host_id,kind,event_key));
-CREATE TABLE IF NOT EXISTS leases (host_id TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(host_id,kind));
-CREATE TABLE IF NOT EXISTS state (host_id TEXT NOT NULL, site_id TEXT NOT NULL, kind TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(host_id,site_id,kind)); PRAGMA user_version=1;`)
+	err = migrate(db)
 	if err != nil {
 		db.Close()
 		return nil, err
 	}
-	return &Store{DB: db}, nil
+	if path != ":memory:" {
+		if err = protectHistory(path, false); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	return &Store{DB: db, policy: (config.History{}).Defaults()}, nil
 }
 
 func (s *Store) Close() error { return s.DB.Close() }
@@ -84,6 +90,9 @@ func (s *Store) LockState(key string) func() {
 }
 
 func (s *Store) Add(ctx context.Context, host, site, kind string, at time.Time, value any) (int64, error) {
+	if err := s.beforeWrite(ctx); err != nil {
+		return 0, err
+	}
 	if host == "" || kind == "" {
 		return 0, fmt.Errorf("record requires host_id and kind")
 	}
@@ -102,6 +111,9 @@ func (s *Store) Add(ctx context.Context, host, site, kind string, at time.Time, 
 // Persistent VPS history is replayed after reconnects, so timestamp-based
 // deduplication keeps those replays from multiplying local history rows.
 func (s *Store) AddUnique(ctx context.Context, host, site, kind string, at time.Time, value any) (bool, error) {
+	if err := s.beforeWrite(ctx); err != nil {
+		return false, err
+	}
 	if host == "" || kind == "" {
 		return false, fmt.Errorf("record requires host_id and kind")
 	}
@@ -140,6 +152,17 @@ func (s *Store) AddUnique(ctx context.Context, host, site, kind string, at time.
 }
 
 func (s *Store) Reports(ctx context.Context, host string, reports []model.Report) error {
+	return s.saveReports(ctx, host, reports, true)
+}
+
+func (s *Store) UpdateReports(ctx context.Context, host string, reports []model.Report) error {
+	return s.saveReports(ctx, host, reports, false)
+}
+
+func (s *Store) saveReports(ctx context.Context, host string, reports []model.Report, history bool) error {
+	if err := s.beforeWrite(ctx); err != nil {
+		return err
+	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -153,6 +176,18 @@ func (s *Store) Reports(ctx context.Context, host string, reports []model.Report
 		if err != nil {
 			return err
 		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO state(host_id,site_id,kind,data) VALUES(?,?,'health',?) ON CONFLICT(host_id,site_id,kind) DO UPDATE SET data=excluded.data", host, r.SiteID, string(data)); err != nil {
+			return err
+		}
+		var previousData string
+		err = tx.QueryRowContext(ctx, "SELECT data FROM records WHERE host_id=? AND site_id=? AND kind='health' ORDER BY id DESC LIMIT 1", host, r.SiteID).Scan(&previousData)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		var previous model.Report
+		if err == nil && json.Unmarshal([]byte(previousData), &previous) == nil && sameHealth(previous, r) && (!history || r.ObservedAt.Sub(previous.ObservedAt) < time.Minute) {
+			continue
+		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES(?,?,?,?,?)", host, r.SiteID, "health", r.ObservedAt.UTC().Format(timestampLayout), string(data)); err != nil {
 			return err
 		}
@@ -161,7 +196,7 @@ func (s *Store) Reports(ctx context.Context, host string, reports []model.Report
 }
 
 func (s *Store) Latest(ctx context.Context, host string) ([]model.Report, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT data FROM records WHERE id IN (SELECT max(id) FROM records WHERE host_id=? AND kind='health' GROUP BY site_id) ORDER BY site_id`, host)
+	rows, err := s.DB.QueryContext(ctx, `SELECT data FROM (SELECT data FROM state WHERE host_id=? AND kind='health' UNION ALL SELECT data FROM records WHERE id IN (SELECT max(id) FROM records WHERE host_id=? AND kind='health' GROUP BY site_id) AND site_id NOT IN (SELECT site_id FROM state WHERE host_id=? AND kind='health')) ORDER BY json_extract(data,'$.site_id')`, host, host, host)
 	if err != nil {
 		return nil, err
 	}
@@ -205,15 +240,6 @@ func (s *Store) Query(ctx context.Context, host, site, kind string, since time.T
 		records = append(records, r)
 	}
 	return records, rows.Err()
-}
-
-func (s *Store) Retain(ctx context.Context, age time.Duration) error {
-	cutoff := time.Now().Add(-age).UTC().Format(timestampLayout)
-	if _, err := s.DB.ExecContext(ctx, `DELETE FROM records WHERE kind IN ('health','external_health','metrics','host_metrics','snapshot','inventory') AND observed_at<? AND id NOT IN (SELECT max(id) FROM records GROUP BY host_id,site_id,kind)`, cutoff); err != nil {
-		return err
-	}
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM history_imports WHERE observed_at<?`, cutoff)
-	return err
 }
 
 // Oldest supplies the first observation in a window without discarding it when
@@ -261,6 +287,9 @@ func (s *Store) LatestEntities(ctx context.Context, host, kind string) ([]Record
 }
 
 func (s *Store) AddOnce(ctx context.Context, host, site, kind, key string, at time.Time, value any) (bool, error) {
+	if err := s.beforeWrite(ctx); err != nil {
+		return false, err
+	}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return false, err
@@ -270,7 +299,7 @@ func (s *Store) AddOnce(ctx context.Context, host, site, kind, key string, at ti
 		return false, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO dedup(host_id,kind,event_key) VALUES(?,?,?)", host, kind, key)
+	result, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO dedup(host_id,kind,event_key,observed_at) VALUES(?,?,?,?)", host, kind, key, at.UTC().Format(timestampLayout))
 	if err != nil {
 		return false, err
 	}
@@ -278,7 +307,15 @@ func (s *Store) AddOnce(ctx context.Context, host, site, kind, key string, at ti
 	if count == 0 {
 		return false, nil
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES(?,?,?,?,?)", host, site, kind, at.UTC().Format(timestampLayout), string(data)); err != nil {
+	result, err = tx.ExecContext(ctx, "INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES(?,?,?,?,?)", host, site, kind, at.UTC().Format(timestampLayout), string(data))
+	if err != nil {
+		return false, err
+	}
+	recordID, err := result.LastInsertId()
+	if err != nil {
+		return false, err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE dedup SET record_id=? WHERE host_id=? AND kind=? AND event_key=?", recordID, host, kind, key); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
@@ -294,6 +331,9 @@ func (s *Store) State(ctx context.Context, host, site, kind string) (json.RawMes
 }
 
 func (s *Store) Transition(ctx context.Context, host, site, stateKind string, state any, eventKind string, at time.Time, event any) error {
+	if err := s.beforeWrite(ctx); err != nil {
+		return err
+	}
 	data, err := json.Marshal(state)
 	if err != nil {
 		return err

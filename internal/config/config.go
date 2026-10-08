@@ -18,6 +18,7 @@ type Config struct {
 	Host      Host      `json:"host"`
 	Sites     []Site    `json:"sites"`
 	Discovery Discovery `json:"discovery,omitempty"`
+	History   History   `json:"history,omitempty"`
 }
 
 type Discovery struct {
@@ -28,6 +29,8 @@ type Discovery struct {
 func (c Config) Discovering() bool { return !c.Discovery.Disabled }
 
 type Host struct {
+	AllServices       bool        `json:"all_services,omitempty"`
+	ServiceUnits      []string    `json:"service_units,omitempty"`
 	Billing           *Billing    `json:"billing,omitempty"`
 	SSHPort           int         `json:"ssh_port,omitempty"`
 	ID                string      `json:"id"`
@@ -141,6 +144,14 @@ func Load(path string) (Config, error) {
 }
 
 func (c *Config) Validate() error {
+	if err := c.History.Validate(); err != nil {
+		return err
+	}
+	for _, unit := range c.Host.ServiceUnits {
+		if !identifier.MatchString(unit) {
+			return fmt.Errorf("invalid configured service unit")
+		}
+	}
 	if !identifier.MatchString(c.Host.ID) {
 		return fmt.Errorf("host.id must be an identifier")
 	}

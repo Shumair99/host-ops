@@ -110,8 +110,10 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 		defer wg.Done()
 		timer := time.NewTicker(30 * time.Second)
 		defer timer.Stop()
+		scanHost := c.Host
 		for {
-			snapshot := Scan(ctx, c.Host)
+			snapshot := Scan(ctx, scanHost)
+			scanHost = rememberServices(scanHost, snapshot)
 			inventoryMu.Lock()
 			latest = snapshot
 			inventoryMu.Unlock()

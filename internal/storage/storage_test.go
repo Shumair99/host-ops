@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/model"
 )
 
@@ -56,7 +57,7 @@ func TestInventoryRetentionKeepsLatestAndOperationalEvidence(t *testing.T) {
 			}
 		}
 	}
-	if err := s.Retain(ctx, 90*24*time.Hour); err != nil {
+	if err := s.Prune(ctx, config.History{RetentionDays: 90}); err != nil {
 		t.Fatal(err)
 	}
 	inventory, err := s.Query(ctx, "h", "", "inventory", time.Time{}, 100)
@@ -104,11 +105,11 @@ func TestRetentionPrunesPersistentHistoryDedupKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := store.Retain(ctx, 90*24*time.Hour); err != nil {
+	if err := store.Prune(ctx, config.History{MetricsDays: 90}); err != nil {
 		t.Fatal(err)
 	}
 	var count int
-	if err := store.DB.QueryRow(`SELECT count(*) FROM history_imports`).Scan(&count); err != nil || count != 0 {
-		t.Fatalf("expired history dedup keys retained: count %d, err %v", count, err)
+	if err := store.DB.QueryRow(`SELECT count(*) FROM history_imports`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("pruned sample keys retained, or current key lost: count %d, err %v", count, err)
 	}
 }

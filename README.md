@@ -8,7 +8,7 @@ The dashboard uses your local account and existing SSH credentials. Collection l
 
 ## Try the offline demonstration
 
-The Windows binaries are built under `bin/`. Open PowerShell:
+Build first with Go 1.26+: run `.\scripts\check.ps1` on Windows. On Linux/macOS run `go build -trimpath -o bin/hostops ./cmd/hostops`, then `bin/hostops dashboard --demo`. Remote connections also need the bundled Linux collectors. The Windows binaries are built under `bin/`. Open PowerShell:
 
 ```powershell
 cd C:\path\to\host-ops
@@ -61,7 +61,7 @@ Windows Terminal with PowerShell is recommended. At 120 columns, Overview shows 
 
 ## Discovery support
 
-Readers cover Docker, Podman, systemd/listeners, Caddy, Nginx, Traefik and explicit Apache virtual hosts. They all produce the same inventory; reconciliation links domains, routes and workloads using network-scoped aliases, addresses, published ports and sockets. Folder layouts and container names are observed rather than assumed.
+Readers cover Docker, Podman, systemd/listeners, Caddy, Nginx, Traefik and explicit Apache virtual hosts. They all produce the same inventory; reconciliation links domains, routes and workloads using network-scoped aliases, addresses, published ports and sockets. Alias ownership must be unique: a generic name shared by several containers stays unresolved. Folder layouts and container names are observed rather than assumed.
 
 Active configuration takes authority over declared configuration for the same proxy. Nginx/Apache dumps and Traefik labels are labelled declared; wildcard domains and catch-all rules are coverage patterns, not invented websites. Unsupported proxies, restricted permissions and opaque dynamic routing remain gaps. This release does not claim universal VPS coverage. See the [discovery architecture, support matrix and migration guide](docs/discovery.md).
 
@@ -72,3 +72,5 @@ Building requires Go 1.26 or newer. On Windows, `scripts/check.ps1` runs tests, 
 Readiness, recovery, security/exposure, cost allocation, capacity, preflight, dependency impact, deployment records and incident capsules remain available through the terminal. Evidence enters through `hostops record`, described in the [deployment](docs/deployments.md), [recovery](docs/recovery.md) and [watcher](docs/watcher.md) guides. HostOps does not execute repairs, maintenance or restores.
 
 Machine-specific manifests, history and inspection evidence belong in ignored `local/`. Keep credentials, private keys, environment values and raw runtime dumps out of Git.
+
+Local history has [configurable retention and a 256 MiB default database budget](docs/history.md). Windows history folders receive private ACLs. The project uses the [MIT license](LICENSE); see [security reporting](SECURITY.md). CI and bundle workflows are prepared for future publication; no public release is implied by a local build.

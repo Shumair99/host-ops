@@ -62,7 +62,7 @@ func readRuntime(ctx context.Context, runner platform.Runner, engine string, sna
 	out := []containerMeta{}
 	for start := 0; start < len(ids); start += 32 {
 		end := min(len(ids), start+32)
-		args := []string{"container", "inspect", "--format", inspectProjection(), "--"}
+		args := []string{"container", "inspect", "--format", discoveryInspect, "--"}
 		if engine == "podman" {
 			args = []string{"container", "inspect", "--format", "{{json .}}", "--"}
 		}
@@ -129,10 +129,6 @@ func proxyKind(executable, image string) string {
 		return "apache"
 	}
 	return ""
-}
-
-func inspectProjection() string {
-	return discoveryInspect
 }
 
 func inspectionContext(ctx context.Context) (context.Context, context.CancelFunc) {

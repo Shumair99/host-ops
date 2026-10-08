@@ -133,6 +133,9 @@ func Run(parent context.Context, c config.Config, dbPath string, opts Options, i
 		return fmt.Errorf("dashboard history unavailable")
 	}
 	defer store.Close()
+	if err = store.Prune(ctx, c.History); err != nil {
+		return fmt.Errorf("dashboard history maintenance: %w", err)
+	}
 	if opts.Demo {
 		if err = SeedDemo(ctx, c, store, false); err != nil {
 			return err

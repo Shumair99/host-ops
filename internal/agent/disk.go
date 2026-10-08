@@ -64,6 +64,9 @@ func DiskState(ctx context.Context, store *storage.Store, host string) (*metrics
 }
 
 func InspectDisk(ctx context.Context, c config.Config, store *storage.Store, force bool) (*metrics.DiskReport, error) {
+	if err := store.Prune(ctx, c.History); err != nil {
+		return nil, err
+	}
 	previous, scan, err := DiskState(ctx, store, c.Host.ID)
 	if err != nil {
 		return previous, err

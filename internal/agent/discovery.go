@@ -78,7 +78,7 @@ func baseReports(c config.Config, registry discovery.Registry, public map[string
 			}
 			check("runtime", state, text)
 		}
-		for index, id := range item.WorkloadIDs {
+		for _, id := range item.WorkloadIDs {
 			w := workloads[id]
 			state := model.Pass
 			if w.Status != "running" && w.Status != "active" {
@@ -88,7 +88,7 @@ func baseReports(c config.Config, registry discovery.Registry, public map[string
 				state = model.Unknown
 			}
 			check("runtime", state, w.Name+": "+w.Status)
-			if index == 0 {
+			if len(item.WorkloadIDs) == 1 {
 				r.Runtime.Name = w.Name
 				r.Runtime.Type = w.Type
 				r.Runtime.Status = w.Status
@@ -126,11 +126,22 @@ func baseReports(c config.Config, registry discovery.Registry, public map[string
 			check("runtime", model.Unknown, "Some route backends could not be mapped to workloads")
 		}
 		proxyState, summary := model.Warn, "Declared route found; loaded state unverified"
+		proxyChecks := map[string]bool{}
 		for _, route := range item.Routes {
 			source := sources[route.SourceID]
+			if route.ProxyID != "" && !proxyChecks[route.ProxyID] {
+				proxyChecks[route.ProxyID] = true
+				state, text := model.Unknown, "Proxy runtime observation unavailable"
+				if w, ok := workloads[route.ProxyID]; ok && sources[w.SourceID].State == "ready" {
+					state, text = model.Fail, w.Name+": "+w.Status
+					if w.Status == "running" || w.Status == "active" {
+						state = model.Pass
+					}
+				}
+				r.Checks = append(r.Checks, model.Check{HostID: c.Host.ID, SiteID: site.ID, Layer: "proxy", Dependency: route.ProxyID, State: state, Summary: text})
+			}
 			if source.State == "ready" && source.Mode == "active" {
 				proxyState, summary = model.Pass, "Domain present in active proxy configuration"
-				break
 			}
 		}
 		if item.State == "stale" {
@@ -211,6 +222,14 @@ func persistReports(ctx context.Context, c config.Config, store *storage.Store, 
 }
 
 func CollectOnce(ctx context.Context, c config.Config, store *storage.Store) error {
+	if err := store.Prune(ctx, c.History); err != nil {
+		return err
+	}
+	var err error
+	c, err = collectorConfig(ctx, c, store)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	path, err := collector.Bootstrap(ctx, c)
@@ -270,7 +289,10 @@ func CollectOnce(ctx context.Context, c config.Config, store *storage.Store) err
 			break
 		}
 	}
-	return persistReports(ctx, resolved, store, baseReports(resolved, registry, public.checks))
+	if err := persistReports(ctx, resolved, store, baseReports(resolved, registry, public.checks)); err != nil {
+		return err
+	}
+	return store.Prune(ctx, c.History)
 }
 
 // RunLive owns the only collector session and schedules public checks independently
@@ -301,7 +323,9 @@ func RunLive(ctx context.Context, c config.Config, store *storage.Store, interva
 		if ctx.Err() != nil {
 			return nil
 		}
-		_ = connection(ctx, store, c.Host.ID, false, err.Error())
+		if writeErr := connection(ctx, store, c.Host.ID, false, err.Error()); writeErr != nil {
+			return fmt.Errorf("persist disconnected state: %w", writeErr)
+		}
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
@@ -318,6 +342,14 @@ func RunLive(ctx context.Context, c config.Config, store *storage.Store, interva
 }
 
 func stream(parent context.Context, c config.Config, store *storage.Store, path string, interval time.Duration, wake <-chan struct{}) error {
+	if err := store.Prune(parent, c.History); err != nil {
+		return err
+	}
+	var err error
+	c, err = collectorConfig(parent, c, store)
+	if err != nil {
+		return err
+	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	session, err := collector.Start(ctx, c, path)
@@ -420,7 +452,7 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 					return err
 				}
 				resolved = discovery.ConfigSites(registry, c)
-				if err = persistReports(ctx, resolved, store, baseReports(resolved, registry, public)); err != nil {
+				if err = refreshReports(ctx, resolved, store, baseReports(resolved, registry, public)); err != nil {
 					return err
 				}
 				launch()
@@ -465,7 +497,7 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 					if err = store.Transition(ctx, c.Host.ID, sample.SiteID, "metrics", sample, "", sample.ObservedAt, nil); err != nil {
 						return err
 					}
-					if historyDue {
+					if historyDue && !sample.ObservedAt.IsZero() {
 						if _, err = store.Add(ctx, c.Host.ID, sample.SiteID, "metrics", sample.ObservedAt, sample); err != nil {
 							return err
 						}
@@ -475,14 +507,47 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 					lastWorkloadHistory = time.Now()
 				}
 			}
-			if time.Since(lastRetain) >= time.Hour {
-				if err = store.Retain(ctx, 90*24*time.Hour); err != nil {
+			if time.Since(lastRetain) >= time.Minute {
+				if err = store.Prune(ctx, c.History); err != nil {
 					return err
 				}
 				lastRetain = time.Now()
 			}
 		}
 	}
+}
+
+// Keep previously observed route owners in filtered service scans so a stopped
+// service remains observable after its listeners/process have disappeared.
+func collectorConfig(ctx context.Context, c config.Config, store *storage.Store) (config.Config, error) {
+	registry, err := store.Inventory(ctx, c.Host.ID)
+	if err != nil {
+		return c, err
+	}
+	owners := map[string]bool{}
+	for _, site := range registry.Sites {
+		if site.State == "removed" {
+			continue
+		}
+		for _, id := range site.WorkloadIDs {
+			owners[id] = true
+		}
+		for _, route := range site.Routes {
+			owners[route.ProxyID] = true
+		}
+	}
+	units := map[string]bool{}
+	c.Host.ServiceUnits = append([]string(nil), c.Host.ServiceUnits...)
+	for _, unit := range c.Host.ServiceUnits {
+		units[unit] = true
+	}
+	for _, w := range registry.Snapshot.Workloads {
+		if w.Type == "systemd" && owners[w.ID] && !units[w.Name] {
+			c.Host.ServiceUnits = append(c.Host.ServiceUnits, w.Name)
+			units[w.Name] = true
+		}
+	}
+	return c, nil
 }
 
 func siteSamples(registry discovery.Registry, c config.Config, samples []metrics.Sample) []metrics.Sample {
@@ -520,10 +585,21 @@ func siteSamples(registry discovery.Registry, c config.Config, samples []metrics
 				}
 			}
 		}
-		if combined.ObservedAt.IsZero() {
-			combined.ObservedAt = time.Now().UTC()
-		}
 		out = append(out, combined)
 	}
 	return out
+}
+
+func refreshReports(ctx context.Context, c config.Config, store *storage.Store, reports []model.Report) error {
+	previous, err := store.Latest(ctx, c.Host.ID)
+	if err != nil {
+		return err
+	}
+	if err = store.UpdateReports(ctx, c.Host.ID, reports); err != nil {
+		return err
+	}
+	if err = events.Record(ctx, store, previous, reports); err != nil {
+		return err
+	}
+	return changes.Record(ctx, store, reports)
 }

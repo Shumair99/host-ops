@@ -150,6 +150,11 @@ func Start(ctx context.Context, c config.Config, path string) (*Session, error) 
 	s.scanner.Buffer(make([]byte, 65536), 8*1024*1024)
 	host := c.Host
 	host.SSH, host.IdentityFile = "", ""
+	for _, site := range c.Sites {
+		if site.Runtime.Type == "systemd" {
+			host.ServiceUnits = append(host.ServiceUnits, site.Runtime.Unit)
+		}
+	}
 	if err = json.NewEncoder(stdin).Encode(Request{Version: discovery.ProtocolVersion, Host: host}); err != nil {
 		s.Close()
 		return nil, err

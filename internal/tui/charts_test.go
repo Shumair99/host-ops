@@ -62,3 +62,17 @@ func TestAllTrendLevelsUseClassicWindowsConsoleGlyphs(t *testing.T) {
 		}
 	}
 }
+
+func TestOverviewExcludesOldAndFutureSamples(t *testing.T) {
+	now := time.Now()
+	samples := []metrics.Sample{{ObservedAt: now.Add(-time.Hour), Values: map[string]float64{"cpu_percent": 99}}, {ObservedAt: now.Add(time.Minute), Values: map[string]float64{"cpu_percent": 100}}, {ObservedAt: now.Add(-time.Second), Values: map[string]float64{"cpu_percent": 38}}}
+	buckets := recentBuckets(samples, "cpu_percent", 12, now)
+	for i, b := range buckets {
+		if i < 11 && b != nil {
+			t.Fatal("old/future sample shown", i, *b)
+		}
+	}
+	if buckets[11] == nil || *buckets[11] != 38 {
+		t.Fatal("recent sample lost", buckets)
+	}
+}

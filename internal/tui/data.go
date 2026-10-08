@@ -25,18 +25,19 @@ import (
 )
 
 type Snapshot struct {
-	Sites      []config.Site
-	Inventory  discovery.Registry
-	Connection agent.Connection
-	Reports    []model.Report
-	Host       metrics.Sample
-	History    []metrics.Sample
-	Workloads  map[string]metrics.Sample
-	Disk       *metrics.DiskReport
-	DiskScan   agent.DiskScan
-	Detail     any
-	Events     []storage.Record
-	LoadedAt   time.Time
+	Sites         []config.Site
+	Inventory     discovery.Registry
+	Connection    agent.Connection
+	Reports       []model.Report
+	Host          metrics.Sample
+	History       []metrics.Sample
+	Workloads     map[string]metrics.Sample
+	Disk          *metrics.DiskReport
+	DiskScan      agent.DiskScan
+	Detail        any
+	Events        []storage.Record
+	LoadedAt      time.Time
+	HistoryNotice string
 }
 type Source struct {
 	Live    bool
@@ -80,6 +81,16 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 		}
 	}
 	snapshot := Snapshot{Sites: s.Config.Sites, Inventory: inventory, LoadedAt: time.Now().UTC(), Reports: []model.Report{}, Host: metrics.Sample{HostID: s.Config.Host.ID, Values: map[string]float64{}, Unavailable: []string{}}}
+	if data, err := s.Store.State(ctx, "hostops", "", "history_pressure"); err != nil {
+		return Snapshot{}, err
+	} else if len(data) > 0 {
+		var notice struct {
+			Issue string `json:"issue"`
+		}
+		if json.Unmarshal(data, &notice) == nil {
+			snapshot.HistoryNotice = notice.Issue
+		}
+	}
 	if data, err := s.Store.State(ctx, s.Config.Host.ID, "", "connection"); err != nil {
 		return Snapshot{}, err
 	} else if len(data) > 0 {
@@ -95,19 +106,12 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 		r, ok := byID[site.ID]
 		if !ok {
 			r = model.Report{HostID: site.HostID, SiteID: site.ID, Name: site.Name, Overall: "unknown", Checks: []model.Check{{Layer: "collector", State: model.Unknown, Summary: "No observations yet"}}}
-		} else if !s.Demo && time.Since(r.ObservedAt) > age {
-			for i := range r.Checks {
-				if r.Checks[i].State != model.Skip {
-					r.Checks[i].State = model.Unknown
-					r.Checks[i].Summary = "Stale observation: " + r.Checks[i].Summary
-				}
-			}
-			r.Checks = append(r.Checks, model.Check{Layer: "collector", State: model.Unknown, Summary: "Observations are stale"})
-			r.Overall = model.Overall(r.Checks)
+		} else if !s.Demo {
+			r = model.Current(r, time.Now(), age)
 		}
 		if s.Live && !snapshot.Connection.Connected {
 			for i := range r.Checks {
-				if r.Checks[i].Layer == "runtime" || r.Checks[i].Layer == "container_health" || r.Checks[i].Layer == "proxy_route" {
+				if r.Checks[i].Layer == "runtime" || r.Checks[i].Layer == "container_health" || r.Checks[i].Layer == "proxy_route" || r.Checks[i].Layer == "proxy" {
 					if r.Checks[i].State != model.Skip {
 						r.Checks[i].State = model.Unknown
 						r.Checks[i].Summary = "Collector unavailable: " + r.Checks[i].Summary

@@ -140,6 +140,7 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	interval := flags.Duration("interval", 30*time.Second, "public HTTP check interval")
 	page := flags.String("page", "overview", "initial dashboard view")
 	color := flags.String("color", "auto", "terminal color: auto, always, never")
+	maxAge := flags.Duration("max-age", model.DefaultMaxAge, "maximum health observation age")
 	id := ""
 	flagArgs := append([]string(nil), args[1:]...)
 	if len(flagArgs) > 0 && !strings.HasPrefix(flagArgs[0], "-") {
@@ -147,6 +148,10 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 		flagArgs = flagArgs[1:]
 	}
 	if err := flags.Parse(flagArgs); err != nil {
+		return 1
+	}
+	if *maxAge <= 0 {
+		fmt.Fprintln(errOut, "max-age must be a positive duration")
 		return 1
 	}
 	if flags.NArg() > 0 {
@@ -200,6 +205,13 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 		if err == nil {
 			observed, err = store.Latest(ctx, c.Host.ID)
 		}
+		if command == "doctor" && err == nil {
+			var data []byte
+			data, err = store.State(ctx, "hostops", "", "history_pressure")
+			if len(data) > 0 {
+				fmt.Fprintf(errOut, "History storage warning: %s\n", data)
+			}
+		}
 		store.Close()
 		if err != nil {
 			fmt.Fprintln(errOut, err)
@@ -237,8 +249,16 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 			return 1
 		}
 		defer store.Close()
+		if err = store.Prune(ctx, c.History); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
 		count, err := evidence.Record(ctx, c, store, id, input)
 		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		if err = store.Prune(ctx, c.History); err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
 		}
@@ -290,6 +310,7 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 		} else {
 			r = health.Collect(ctx, c, s, platform.Command{Host: c.Host})
 		}
+		r = model.Current(r, time.Now(), *maxAge)
 		reports = append(reports, r)
 		if r.Overall != "healthy" {
 			code = 2

@@ -96,6 +96,10 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 		return 1
 	}
 	defer store.Close()
+	if err = store.Prune(ctx, c.History); err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
 	if command == "incidents" {
 		value, err := incidents.List(ctx, store, c.Host.ID, id)
 		if err != nil {
@@ -103,6 +107,15 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 			return 1
 		}
 		encoder.Encode(value)
+		return 0
+	}
+	if command == "events" {
+		records, err := store.Activity(ctx, c.Host.ID, id, time.Now().Add(-duration), 1000)
+		if err != nil {
+			fmt.Fprintln(errOut, "Timeline query failed")
+			return 1
+		}
+		encoder.Encode(records)
 		return 0
 	}
 	if command == "capsule" {
@@ -201,17 +214,11 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 		return 0
 	}
 	kind := "health"
-	if command == "events" {
-		kind = "event"
-	}
 	if command == "deployments" {
 		kind = "deployment"
 	}
 	if command == "diff" {
 		kind = "change"
-	}
-	if command == "incidents" {
-		kind = "incident"
 	}
 	records, err := store.Query(ctx, c.Host.ID, id, kind, time.Now().Add(-duration), 1000)
 	if err != nil {

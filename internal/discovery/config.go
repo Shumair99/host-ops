@@ -68,7 +68,7 @@ func ConfigSites(registry Registry, base config.Config) config.Config {
 				s.Runtime = config.Runtime{Type: "static", Directory: route.Root}
 			}
 		}
-		if len(item.WorkloadIDs) > 0 {
+		if len(item.WorkloadIDs) == 1 {
 			w := workloads[item.WorkloadIDs[0]]
 			s.Runtime.Type = w.Type
 			if w.Type == "docker" || w.Type == "podman" {
@@ -89,7 +89,11 @@ func ConfigSites(registry Registry, base config.Config) config.Config {
 		}
 		if old, ok := manual[item.Domain]; ok {
 			s.ID, s.Name, s.Repository, s.Branch, s.Business, s.Recovery = old.ID, old.Name, old.Repository, old.Branch, old.Business, old.Recovery
+			derivedURL := s.Health.PublicURL
 			s.Health = old.Health
+			if s.Health.PublicURL == "" {
+				s.Health.PublicURL = derivedURL
+			}
 			delete(manual, item.Domain)
 		}
 		for key := range dependencies {

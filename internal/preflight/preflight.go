@@ -124,7 +124,12 @@ func Assess(ctx context.Context, c config.Config, target string, reports []model
 					state = model.Fail
 				}
 			}
-			_ = checks
+			for _, check := range checks {
+				if check.State == model.Unknown {
+					state = model.Unknown
+					summary = check.Summary
+				}
+			}
 			add("", "caddy_boot", state, summary)
 		}
 	}
@@ -136,7 +141,7 @@ func Assess(ctx context.Context, c config.Config, target string, reports []model
 		current := byID[site.ID]
 		state := model.Unknown
 		summary := "Fresh health observation missing"
-		if !current.ObservedAt.IsZero() && time.Since(current.ObservedAt) < 3*time.Minute {
+		if model.Fresh(current.ObservedAt, time.Now(), model.DefaultMaxAge) {
 			summary = current.Overall
 			state = model.Pass
 			if current.Overall == "critical" {

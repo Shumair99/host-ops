@@ -155,6 +155,9 @@ func (m dashboard) frame() string {
 		state = "COLLECTION ERROR"
 	}
 	header := t.paint(host, ink) + "  " + t.paint(state, statusColor(state))
+	if m.snapshot.HistoryNotice != "" {
+		header += t.paint("  HISTORY PRUNED · doctor for details", amber)
+	}
 	if m.source.Live && m.snapshot.Connection.Connected && !m.snapshot.Host.ObservedAt.IsZero() && time.Since(m.snapshot.Host.ObservedAt) > 5*time.Second {
 		header += t.paint("  TELEMETRY STALE · "+ageLabel(m.snapshot.Host.ObservedAt), amber)
 	}

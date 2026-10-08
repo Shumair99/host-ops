@@ -189,6 +189,7 @@ func ResolveUpstream(upstream string, route Route, snapshot Snapshot) []string {
 		host = address
 	}
 	ids := map[string]bool{}
+	identities := map[string]bool{}
 	for _, w := range snapshot.Workloads {
 		for network, details := range w.Networks {
 			shared := false
@@ -204,6 +205,9 @@ func ResolveUpstream(upstream string, route Route, snapshot Snapshot) []string {
 				continue
 			}
 			matched := host == w.Name || host == details.IP
+			if matched {
+				identities[w.ID] = true
+			}
 			for _, alias := range details.Aliases {
 				matched = matched || host == alias
 			}
@@ -242,6 +246,17 @@ func ResolveUpstream(upstream string, route Route, snapshot Snapshot) []string {
 	out := []string{}
 	for id := range ids {
 		out = append(out, id)
+	}
+	// An observed address/container identity is stronger than a generic alias.
+	// Generic aliases must be unique across every network visible to this proxy.
+	if len(identities) > 0 {
+		out = nil
+		for id := range identities {
+			out = append(out, id)
+		}
+	}
+	if len(out) != 1 {
+		return []string{}
 	}
 	sort.Strings(out)
 	return out

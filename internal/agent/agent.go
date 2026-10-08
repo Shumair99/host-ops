@@ -20,6 +20,9 @@ import (
 )
 
 func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
+	if err := store.Prune(ctx, c.History); err != nil {
+		return err
+	}
 	if c.Discovering() {
 		return CollectOnce(ctx, c, store)
 	}
@@ -87,7 +90,7 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
 			return err
 		}
 	}
-	return store.Retain(ctx, 90*24*time.Hour)
+	return store.Prune(ctx, c.History)
 }
 
 func Run(ctx context.Context, c config.Config, store *storage.Store, interval time.Duration) error {

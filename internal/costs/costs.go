@@ -68,10 +68,16 @@ func allocationSites(sites []config.Site) []config.Site {
 func allocate(c config.Config, samples map[string][]metrics.Sample, total *float64) Report {
 	c.Sites = allocationSites(c.Sites)
 	w := c.Host.CostWeights
+	defaultWeights := false
 	if w.Equal+w.Memory+w.CPU == 0 {
 		w = config.CostWeights{Equal: .4, Memory: .3, CPU: .3}
+		defaultWeights = true
 	}
 	r := Report{HostID: c.Host.ID, ObservedAt: time.Now().UTC(), Currency: c.Host.Currency, Weights: w, Formula: "monthly estimate * (equal_weight / property_count + memory_weight * memory_share + cpu_weight * cpu_share)", Sites: []Allocation{}, Notes: []string{"Allocation is a budget estimate across monitored properties, not financial accounting.", "Incomplete or zero aggregate usage assigns equal shares to that resource's allocation component.", "Each property's window contains at most the latest 1,000 records in 24 hours; unmanaged services are shared overhead."}}
+	r.Notes[1] = "Missing properties receive only their equal share of each resource component; measured properties divide the remaining share by measured usage. Zero aggregate usage divides the component equally."
+	if defaultWeights {
+		r.Notes = append(r.Notes, "Default weights: 40% equal, 30% memory, 30% CPU.")
+	}
 	if total != nil {
 		r.TotalCost = total
 	} else {
@@ -79,7 +85,8 @@ func allocate(c config.Config, samples map[string][]metrics.Sample, total *float
 	}
 	cpus, memories := map[string]float64{}, map[string]float64{}
 	cpuTotal, memoryTotal, revenueTotal := 0.0, 0.0, 0.0
-	cpuComplete, memoryComplete := true, true
+	cpuKnown, memoryKnown := map[string]bool{}, map[string]bool{}
+	cpuMissing, memoryMissing := 0, 0
 	for _, site := range c.Sites {
 		cpuCount, memoryCount := 0, 0
 		for _, sample := range samples[site.ID] {
@@ -98,8 +105,14 @@ func allocate(c config.Config, samples map[string][]metrics.Sample, total *float
 		if memoryCount > 0 {
 			memories[site.ID] /= float64(memoryCount)
 		}
-		cpuComplete = cpuComplete && cpuCount > 0
-		memoryComplete = memoryComplete && memoryCount > 0
+		cpuKnown[site.ID] = cpuCount > 0
+		memoryKnown[site.ID] = memoryCount > 0
+		if cpuCount == 0 {
+			cpuMissing++
+		}
+		if memoryCount == 0 {
+			memoryMissing++
+		}
 		cpuTotal += cpus[site.ID]
 		memoryTotal += memories[site.ID]
 		revenueTotal += site.Business.MonthlyFee
@@ -107,11 +120,11 @@ func allocate(c config.Config, samples map[string][]metrics.Sample, total *float
 	for _, site := range c.Sites {
 		equal := 1 / float64(len(c.Sites))
 		cpuShare, memoryShare := equal, equal
-		if cpuTotal > 0 && cpuComplete {
-			cpuShare = cpus[site.ID] / cpuTotal
+		if cpuTotal > 0 && cpuKnown[site.ID] {
+			cpuShare = (1 - float64(cpuMissing)*equal) * cpus[site.ID] / cpuTotal
 		}
-		if memoryTotal > 0 && memoryComplete {
-			memoryShare = memories[site.ID] / memoryTotal
+		if memoryTotal > 0 && memoryKnown[site.ID] {
+			memoryShare = (1 - float64(memoryMissing)*equal) * memories[site.ID] / memoryTotal
 		}
 		a := Allocation{HostID: site.HostID, SiteID: site.ID, Name: site.Name, Samples: len(samples[site.ID]), CPUshare: cpuShare, MemoryShare: memoryShare}
 		if r.TotalCost != nil {
@@ -125,7 +138,7 @@ func allocate(c config.Config, samples map[string][]metrics.Sample, total *float
 				margin := fee - *a.Cost
 				a.Margin = &margin
 			}
-			if revenueTotal > 0 && memoryTotal > 0 && memoryComplete {
+			if revenueTotal > 0 && memoryTotal > 0 && memoryKnown[site.ID] {
 				a.NoisyNeighbour = memoryShare > .3 && memoryShare > 2*fee/revenueTotal
 			}
 		}

@@ -14,6 +14,9 @@ import (
 )
 
 func Cycle(ctx context.Context, c config.Config, store *storage.Store, failures, recoveries int, webhook string) ([]model.Report, error) {
+	if err := store.Prune(ctx, c.History); err != nil {
+		return nil, err
+	}
 	reports := []model.Report{}
 	for _, site := range c.Sites {
 		r := health.External(ctx, site)
@@ -30,13 +33,15 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store, failures,
 		}
 		if incident != nil && webhook != "" {
 			delivery := "delivered"
-			if alerts.Notify(ctx, webhook, *incident) != nil {
+			issue := ""
+			if err := alerts.Notify(ctx, webhook, *incident); err != nil {
 				delivery = "failed"
+				issue = err.Error()
 			}
-			if _, err = store.Add(ctx, r.HostID, r.SiteID, "alert", time.Now().UTC(), map[string]string{"host_id": r.HostID, "site_id": r.SiteID, "incident_id": incident.ID, "delivery": delivery}); err != nil {
+			if _, err = store.Add(ctx, r.HostID, r.SiteID, "alert", time.Now().UTC(), map[string]string{"host_id": r.HostID, "site_id": r.SiteID, "incident_id": incident.ID, "status": incident.Status, "delivery": delivery, "issue": issue}); err != nil {
 				return nil, err
 			}
 		}
 	}
-	return reports, store.Retain(ctx, 90*24*time.Hour)
+	return reports, store.Prune(ctx, c.History)
 }

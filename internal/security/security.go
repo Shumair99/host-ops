@@ -53,7 +53,7 @@ func Posture(site config.Site, r model.Report) []Finding {
 	if site.Runtime.Type != "docker" {
 		return []Finding{{SiteID: site.ID, State: model.Unknown, Title: "Container posture does not apply", Evidence: "Runtime: " + site.Runtime.Type, Investigation: "Assess permissions and exposure for this runtime separately."}}
 	}
-	if r.Runtime.Status == "" || time.Since(r.ObservedAt) > 3*time.Minute {
+	if r.Runtime.Status == "" || !model.Fresh(r.ObservedAt, time.Now(), model.DefaultMaxAge) {
 		return []Finding{{SiteID: site.ID, State: model.Unknown, Title: "Fresh runtime metadata unavailable", Investigation: "Collect runtime state before evaluating security posture."}}
 	}
 	out := []Finding{}

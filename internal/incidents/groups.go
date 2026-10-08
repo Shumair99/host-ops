@@ -6,80 +6,94 @@ import (
 	"sort"
 )
 
+// GroupReports correlates only observations of the same dependency. Unreadable
+// configuration is unknown; confirmed proxy runtime failure can suppress site incidents.
 func GroupReports(c config.Config, reports []model.Report, source string) []model.Report {
-	if len(reports) < 2 {
-		return reports
+	type observation struct {
+		report model.Report
+		state  model.State
+		layer  string
 	}
-	layer, dependency := "caddy", "caddy"
-	if source == "watcher" {
-		layer, dependency = "tcp", "shared_public_path"
-	}
-	eligible := []model.Report{}
+	groups := map[string][]observation{}
 	for _, r := range reports {
+		seen := map[string]bool{}
 		for _, check := range r.Checks {
-			if check.Layer == layer {
-				eligible = append(eligible, r)
-				break
+			dependency := ""
+			if source == "watcher" && check.Layer == "tcp" {
+				dependency = "shared_public_path"
 			}
-		}
-	}
-	if len(eligible) < 2 {
-		return reports
-	}
-	allFail, allPass := true, true
-	ids := []string{}
-	latest := eligible[0].ObservedAt
-	for _, r := range eligible {
-		ids = append(ids, r.SiteID)
-		if r.ObservedAt.After(latest) {
-			latest = r.ObservedAt
-		}
-		for _, check := range r.Checks {
-			if check.Layer == layer {
-				allFail = allFail && check.State == model.Fail
-				allPass = allPass && check.State == model.Pass
-			}
-		}
-	}
-	if source == "watcher" {
-		if len(eligible) != len(c.Sites) {
-			allFail, allPass = false, false
-		}
-		for _, r := range eligible {
-			dnsPass := false
-			for _, check := range r.Checks {
-				if check.Layer == "dns" && check.State == model.Pass {
-					dnsPass = true
+			if source != "watcher" {
+				if check.Layer == "proxy" {
+					dependency = check.Dependency
+				}
+				if check.Layer == "caddy" {
+					dependency = "caddy"
 				}
 			}
-			allFail = allFail && dnsPass
+			if dependency == "" || seen[dependency] {
+				continue
+			}
+			seen[dependency] = true
+			state := check.State
+			if source == "watcher" && state == model.Fail {
+				dns := false
+				for _, x := range r.Checks {
+					dns = dns || x.Layer == "dns" && x.State == model.Pass
+				}
+				if !dns {
+					state = model.Unknown
+				}
+			}
+			groups[dependency] = append(groups[dependency], observation{r, state, check.Layer})
 		}
 	}
-	sort.Strings(ids)
-	state := model.Unknown
-	if allFail {
-		state = model.Fail
-	} else if allPass {
-		state = model.Pass
+	keys := []string{}
+	for key := range groups {
+		keys = append(keys, key)
 	}
-	key := "dependency:" + dependency
-	joint := model.Report{HostID: c.Host.ID, SiteID: key, Name: "Shared " + dependency, ObservedAt: latest, Vantage: source, Runtime: model.Runtime{HostID: c.Host.ID, SiteID: key, Type: "dependency", Status: string(state)}, Dependency: dependency, AffectedSiteIDs: ids, Checks: []model.Check{{HostID: c.Host.ID, SiteID: key, Layer: layer, State: state, Summary: "Shared dependency observed across registered properties"}}}
-	joint.Overall = model.Overall(joint.Checks)
-	if allFail {
-		confidence := "high"
-		finding := "Shared reverse proxy failure"
-		if source == "watcher" {
-			confidence = "medium"
-			finding = "Multiple properties fail on the shared public path"
-		}
-		joint.Diagnoses = []model.Diagnosis{{HostID: c.Host.ID, SiteID: key, Finding: finding, Confidence: confidence, Layer: dependency, Evidence: ids, Investigation: "Inspect the shared dependency and the observer's network before treating each site as an independent outage."}}
-	}
-	out := []model.Report{joint}
+	sort.Strings(keys)
+	out := []model.Report{}
 	suppressed := map[string]bool{}
-	if allFail {
-		for _, id := range ids {
-			suppressed[id] = true
+	for _, dependency := range keys {
+		group := groups[dependency]
+		if len(group) < 2 {
+			continue
 		}
+		allFail, allPass := true, true
+		ids := []string{}
+		latest := group[0].report.ObservedAt
+		for _, x := range group {
+			ids = append(ids, x.report.SiteID)
+			allFail = allFail && x.state == model.Fail
+			allPass = allPass && x.state == model.Pass
+			if x.report.ObservedAt.After(latest) {
+				latest = x.report.ObservedAt
+			}
+		}
+		if source == "watcher" && len(group) != len(c.Sites) {
+			allFail, allPass = false, false
+		}
+		state := model.Unknown
+		if allFail {
+			state = model.Fail
+		} else if allPass {
+			state = model.Pass
+		}
+		sort.Strings(ids)
+		key := "dependency:" + dependency
+		joint := model.Report{HostID: c.Host.ID, SiteID: key, Name: "Shared " + dependency, ObservedAt: latest, Vantage: source, Runtime: model.Runtime{HostID: c.Host.ID, SiteID: key, Type: "dependency", Status: string(state)}, Dependency: dependency, AffectedSiteIDs: ids, Checks: []model.Check{{HostID: c.Host.ID, SiteID: key, Layer: group[0].layer, Dependency: dependency, State: state, Summary: "Shared dependency observed across properties"}}}
+		joint.Overall = model.Overall(joint.Checks)
+		if allFail {
+			confidence, finding := "high", "Shared reverse proxy failure"
+			if source == "watcher" {
+				confidence, finding = "medium", "Multiple properties fail on the shared public path"
+			}
+			joint.Diagnoses = []model.Diagnosis{{HostID: c.Host.ID, SiteID: key, Finding: finding, Confidence: confidence, Layer: dependency, Evidence: ids, Investigation: "Inspect the shared dependency and observer network; correlation alone does not prove the root cause."}}
+			for _, id := range ids {
+				suppressed[id] = true
+			}
+		}
+		out = append(out, joint)
 	}
 	for _, r := range reports {
 		if suppressed[r.SiteID] {

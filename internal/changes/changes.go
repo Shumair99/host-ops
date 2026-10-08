@@ -90,7 +90,11 @@ func Record(ctx context.Context, store *storage.Store, reports []model.Report) e
 			if err = json.Unmarshal(previous[0].Data, &old); err != nil {
 				return err
 			}
-			for _, change := range Between(old, current) {
+			diff := Between(old, current)
+			if len(diff) == 0 {
+				continue
+			}
+			for _, change := range diff {
 				if _, err = store.Add(ctx, r.HostID, r.SiteID, "change", r.ObservedAt, change); err != nil {
 					return err
 				}

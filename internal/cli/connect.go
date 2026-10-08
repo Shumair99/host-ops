@@ -104,6 +104,7 @@ func discover(ctx context.Context, args []string, out, errOut io.Writer) int {
 	db := flags.String("db", "local/hostops.db", "inventory database")
 	asJSON := flags.Bool("json", false, "JSON output")
 	cached := flags.Bool("no-collect", false, "use existing inventory")
+	allServices := flags.Bool("all-services", false, "include non-listening systemd services")
 	if flags.Parse(args) != nil {
 		return 1
 	}
@@ -116,6 +117,7 @@ func discover(ctx context.Context, args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
+	c.Host.AllServices = c.Host.AllServices || *allServices
 	store, err := storage.Open(*db)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
@@ -143,6 +145,11 @@ func discover(ctx context.Context, args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(out, "Inventory: %d sites, %d workloads, %d route patterns\n", len(registry.Sites), len(registry.Snapshot.Workloads), len(registry.Patterns))
 		for _, site := range registry.Sites {
 			fmt.Fprintf(out, "%-45s %s\n", console.Safe(site.Domain), site.State)
+		}
+		for _, site := range discovery.ConfigSites(registry, c).Sites {
+			if site.Health.PublicURL == "" {
+				fmt.Fprintf(out, "Warning: %s has no observed public endpoint\n", console.Safe(site.Name))
+			}
 		}
 		fmt.Fprintln(out, "\nSource coverage:")
 		for _, source := range registry.Snapshot.Sources {

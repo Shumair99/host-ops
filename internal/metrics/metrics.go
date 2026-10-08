@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -165,32 +164,6 @@ func Container(ctx context.Context, runner platform.Runner, s config.Site) Sampl
 		m.Unavailable = append(m.Unavailable, "container stats")
 		return m
 	}
-	var fields map[string]string
-	if json.Unmarshal(data, &fields) != nil {
-		m.Unavailable = append(m.Unavailable, "container stats decoding")
-		return m
-	}
-	if n, err := strconv.ParseFloat(strings.TrimSuffix(fields["CPUPerc"], "%"), 64); err == nil {
-		m.Values["cpu_percent"] = n
-	}
-	if n, err := strconv.ParseFloat(strings.TrimSuffix(fields["MemPerc"], "%"), 64); err == nil {
-		m.Values["memory_percent"] = n
-	}
-	if pieces := strings.Split(fields["MemUsage"], " / "); len(pieces) == 2 {
-		if n, err := Bytes(pieces[0]); err == nil {
-			m.Values["memory_used_bytes"] = n
-		}
-		if n, err := Bytes(pieces[1]); err == nil {
-			m.Values["memory_limit_bytes"] = n
-		}
-	}
-	if pieces := strings.Split(fields["NetIO"], " / "); len(pieces) == 2 {
-		if n, err := Bytes(pieces[0]); err == nil {
-			m.Values["network_rx_bytes"] = n
-		}
-		if n, err := Bytes(pieces[1]); err == nil {
-			m.Values["network_tx_bytes"] = n
-		}
-	}
+	m.Values, m.Unavailable = ParseStats(data)
 	return m
 }

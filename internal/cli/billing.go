@@ -127,6 +127,10 @@ func billingCommand(ctx context.Context, args []string, out, errOut io.Writer) i
 		return 1
 	}
 	defer db.Close()
+	if err = db.Prune(ctx, c.History); err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
 	r, err := billing.Resolve(ctx, c.Host, db, action == "sync")
 	if err != nil {
 		fmt.Fprintln(errOut, err)

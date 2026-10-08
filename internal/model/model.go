@@ -13,6 +13,7 @@ const (
 )
 
 type Check struct {
+	Dependency string  `json:"dependency,omitempty"`
 	HostID     string  `json:"host_id"`
 	SiteID     string  `json:"site_id"`
 	Layer      string  `json:"layer"`

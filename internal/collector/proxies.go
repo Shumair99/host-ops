@@ -5,7 +5,6 @@ import (
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/discovery"
 	"github.com/Shumair99/host-ops/internal/platform"
-	"sort"
 	"strings"
 )
 
@@ -34,11 +33,7 @@ func argument(args []string, key, defaultValue string) string {
 }
 
 func readCaddy(ctx context.Context, runner platform.Runner, host config.Host, instance proxyInstance, snapshot *discovery.Snapshot) {
-	networks := []string{}
-	for name := range instance.workload.Networks {
-		networks = append(networks, name)
-	}
-	sort.Strings(networks)
+	networks := proxyNetworks(instance)
 	active := discovery.Source{ID: "active/caddy/" + instance.workload.ID, ParentID: instance.workload.SourceID, Kind: "caddy", State: "ready", Mode: "active", ObservedAt: snapshot.ObservedAt}
 	active.ProxyID = instance.workload.ID
 	admin := "http://127.0.0.1:2019"

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -56,49 +55,8 @@ func activitySummary(r storage.Record) string {
 	return recordSummary(r.Data)
 }
 
-// Event and change records can describe the same transition. Keep one visible
-// activity per site, timestamp and field while retaining the underlying history.
-func mergedActivity(records []storage.Record, limit int) []storage.Record {
-	sort.SliceStable(records, func(i, j int) bool {
-		if records[i].ObservedAt.Equal(records[j].ObservedAt) {
-			return records[i].Kind == "event" && records[j].Kind != "event"
-		}
-		return records[i].ObservedAt.After(records[j].ObservedAt)
-	})
-	seen, out := map[string]bool{}, []storage.Record{}
-	for _, r := range records {
-		var d map[string]any
-		json.Unmarshal(r.Data, &d)
-		field, _ := d["field"].(string)
-		kind, _ := d["type"].(string)
-		if r.Kind == "event" {
-			field = map[string]string{"health_changed": "health", "runtime_changed": "runtime.status", "image_changed": "runtime.image_id", "container_recreated": "runtime.started_at", "proxy_changed": "proxy_route"}[kind]
-		}
-		if field == "" {
-			field = r.Kind + ":" + kind
-		}
-		key := r.SiteID + "/" + r.ObservedAt.Format(time.RFC3339Nano) + "/" + field
-		if !seen[key] {
-			out = append(out, r)
-			seen[key] = true
-		}
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out
-}
-
 func (s Source) activity(ctx context.Context, siteID string, limit int) ([]storage.Record, error) {
-	records := []storage.Record{}
-	for _, kind := range []string{"event", "change", "deployment", "incident"} {
-		more, err := s.Store.Query(ctx, s.Config.Host.ID, siteID, kind, time.Now().Add(-24*time.Hour), limit)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, more...)
-	}
-	return mergedActivity(records, limit), nil
+	return s.Store.Activity(ctx, s.Config.Host.ID, siteID, time.Now().Add(-24*time.Hour), limit)
 }
 
 func timelineLabels(sites []config.Site) map[string]string {

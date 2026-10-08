@@ -41,7 +41,7 @@ func Decode(reader io.Reader, value any) error {
 func Record(ctx context.Context, c config.Config, store *storage.Store, kind string, input io.Reader) (int, error) {
 	now := time.Now().UTC()
 	var value any
-	var site, id, status, origin string
+	var site, id, status string
 	switch kind {
 	case "deployment":
 		var d deployments.Deployment
@@ -58,7 +58,7 @@ func Record(ctx context.Context, c config.Config, store *storage.Store, kind str
 		d.Origin = "deployment_notification"
 		d.ObservedAt = now
 		value = d
-		site, id, status, origin = d.SiteID, d.ID, d.Status, d.Origin
+		site, id, status = d.SiteID, d.ID, d.Status
 	case "backup":
 		var b recovery.Backup
 		if err := Decode(input, &b); err != nil {
@@ -71,7 +71,7 @@ func Record(ctx context.Context, c config.Config, store *storage.Store, kind str
 		b.Origin = "operator_report"
 		b.ObservedAt = now
 		value = b
-		site, id, status, origin = b.SiteID, b.ID, b.Status, b.Origin
+		site, id, status = b.SiteID, b.ID, b.Status
 	case "restore":
 		var r recovery.Restore
 		if err := Decode(input, &r); err != nil {
@@ -85,7 +85,7 @@ func Record(ctx context.Context, c config.Config, store *storage.Store, kind str
 		r.ObservedAt = now
 		r.MeasuredRTOseconds = r.CompletedAt.Sub(r.StartedAt).Seconds()
 		value = r
-		site, id, status, origin = r.SiteID, r.ID, r.Status, r.Origin
+		site, id, status = r.SiteID, r.ID, r.Status
 	case "observations":
 		var reports []model.Report
 		if err := Decode(input, &reports); err != nil {
@@ -95,7 +95,6 @@ func Record(ctx context.Context, c config.Config, store *storage.Store, kind str
 	default:
 		return 0, fmt.Errorf("record kind must be deployment, backup, restore or observations")
 	}
-	_ = origin
 	if site == "" {
 		return 0, fmt.Errorf("site_id required")
 	}

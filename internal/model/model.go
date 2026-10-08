@@ -68,15 +68,17 @@ type Diagnosis struct {
 }
 
 type Report struct {
-	HostID     string      `json:"host_id"`
-	SiteID     string      `json:"site_id"`
-	Name       string      `json:"name"`
-	ObservedAt time.Time   `json:"observed_at"`
-	Vantage    string      `json:"vantage"`
-	Overall    string      `json:"overall"`
-	Runtime    Runtime     `json:"runtime"`
-	Checks     []Check     `json:"checks"`
-	Diagnoses  []Diagnosis `json:"diagnoses"`
+	HostID          string      `json:"host_id"`
+	SiteID          string      `json:"site_id"`
+	Name            string      `json:"name"`
+	ObservedAt      time.Time   `json:"observed_at"`
+	Vantage         string      `json:"vantage"`
+	Overall         string      `json:"overall"`
+	Runtime         Runtime     `json:"runtime"`
+	Checks          []Check     `json:"checks"`
+	Diagnoses       []Diagnosis `json:"diagnoses"`
+	AffectedSiteIDs []string    `json:"affected_site_ids,omitempty"`
+	Dependency      string      `json:"dependency,omitempty"`
 }
 
 func Overall(checks []Check) string {

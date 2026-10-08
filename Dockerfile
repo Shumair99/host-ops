@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /hostops ./cmd/hostops && \
     CGO_ENABLED=0 go build -trimpath -o /hostops-watcher ./cmd/hostops-watcher
 
 FROM alpine:3.23
-RUN apk add --no-cache ca-certificates curl docker-cli openssh-client coreutils
+RUN apk add --no-cache ca-certificates curl docker-cli openssh-client coreutils iproute2
 COPY --from=backend /hostops /hostops-agent /hostops-watcher /usr/local/bin/
 COPY --from=frontend /app/web/dist /opt/hostops/web
 WORKDIR /opt/hostops

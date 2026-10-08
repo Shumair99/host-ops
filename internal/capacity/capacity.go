@@ -60,7 +60,7 @@ func Evaluate(host string, samples []metrics.Sample, now time.Time) Report {
 	if value, ok := latest.Values["disk_free_bytes"]; ok {
 		r.FreeBytes = &value
 	}
-	if now.Sub(latest.ObservedAt) <= 3*time.Minute {
+	if now.Sub(latest.ObservedAt) <= 3*time.Minute && r.DiskPercent != nil && latest.Values != nil {
 		r.State = model.Pass
 		if r.DiskPercent != nil && *r.DiskPercent >= 80 || r.Memory95 != nil && *r.Memory95 >= 80 || r.CPU95 != nil && *r.CPU95 >= 80 {
 			r.State = model.Warn
@@ -69,7 +69,7 @@ func Evaluate(host string, samples []metrics.Sample, now time.Time) Report {
 			r.State = model.Fail
 		}
 	} else {
-		r.Notes = append(r.Notes, "The latest host sample is stale.")
+		r.Notes = append(r.Notes, "The latest host sample is stale or lacks disk measurements.")
 	}
 	first := samples[0]
 	days := latest.ObservedAt.Sub(first.ObservedAt).Hours() / 24

@@ -11,6 +11,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/capacity"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/costs"
+	"github.com/Shumair99/host-ops/internal/incidents"
 	"github.com/Shumair99/host-ops/internal/logs"
 	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/model"
@@ -83,6 +84,24 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 		return 1
 	}
 	defer store.Close()
+	if command == "incidents" {
+		value, err := incidents.List(ctx, store, c.Host.ID, id)
+		if err != nil {
+			fmt.Fprintln(errOut, "Incident history unavailable")
+			return 1
+		}
+		encoder.Encode(value)
+		return 0
+	}
+	if command == "capsule" {
+		value, err := incidents.Export(ctx, store, c.Host.ID, id)
+		if err != nil {
+			fmt.Fprintln(errOut, "Incident not found")
+			return 1
+		}
+		encoder.Encode(value)
+		return 0
+	}
 	if command == "preflight" {
 		reports, err := store.Latest(ctx, c.Host.ID)
 		if err != nil {

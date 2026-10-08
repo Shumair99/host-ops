@@ -11,6 +11,7 @@ import (
 	"github.com/Shumair99/host-ops/api"
 	"github.com/Shumair99/host-ops/internal/changes"
 	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/diagnostics"
 	"github.com/Shumair99/host-ops/internal/events"
 	"github.com/Shumair99/host-ops/internal/health"
 	"github.com/Shumair99/host-ops/internal/incidents"
@@ -47,6 +48,17 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	oldByID := map[string]model.Report{}
+	for _, r := range previous {
+		oldByID[r.SiteID] = r
+	}
+	for i := range reports {
+		d, err := store.Query(ctx, c.Host.ID, reports[i].SiteID, "deployment", reports[i].ObservedAt.Add(-5*time.Minute), 10)
+		if err != nil {
+			return err
+		}
+		reports[i].Diagnoses = append(reports[i].Diagnoses, diagnostics.Correlate(oldByID[reports[i].SiteID], reports[i], d)...)
+	}
 	if err := store.Reports(ctx, c.Host.ID, reports); err != nil {
 		return err
 	}
@@ -56,7 +68,7 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
 	if err := changes.Record(ctx, store, reports); err != nil {
 		return err
 	}
-	for _, r := range reports {
+	for _, r := range incidents.GroupReports(c, reports, "agent") {
 		if _, err := incidents.Observe(ctx, store, r, "agent", 3, 2); err != nil {
 			return err
 		}

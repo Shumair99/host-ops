@@ -140,6 +140,10 @@ func Inspect(ctx context.Context, c config.Config, reports []model.Report, runne
 		}
 		site := config.Site{HostID: c.Host.ID, Runtime: config.Runtime{Type: "docker", Container: container.Name}}
 		metadata, _ := runtimecheck.InspectDocker(ctx, runner, site)
+		if metadata.Status == "" {
+			r.Unavailable = append(r.Unavailable, "Published ports unavailable for "+container.Name)
+			continue
+		}
 		r.Exposures = append(r.Exposures, Published(site, metadata, c.Host.CaddyContainer)...)
 	}
 	data, err = runner.Run(ctx, "ss", "-H", "-lnt")

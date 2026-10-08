@@ -24,3 +24,16 @@ func TestUnknownEvidenceCannotEarnReadinessPoints(t *testing.T) {
 		t.Fatal("stale runtime earned points")
 	}
 }
+
+func TestRootWithGroupCannotPassUserRule(t *testing.T) {
+	now := time.Now()
+	site := config.Site{ID: "s", HostID: "h", Runtime: config.Runtime{Type: "docker"}}
+	for _, user := range []string{"root:root", "0:1000"} {
+		a := Evaluate(site, model.Report{ObservedAt: now, Runtime: model.Runtime{Status: "running", User: user}}, Evidence{}, now)
+		for _, rule := range a.Rules {
+			if rule.ID == "user" && rule.State != model.Fail {
+				t.Fatal(rule)
+			}
+		}
+	}
+}

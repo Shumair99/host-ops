@@ -25,13 +25,16 @@ type Incident struct {
 }
 
 type tracking struct {
-	Failures     int       `json:"failures"`
-	Recoveries   int       `json:"recoveries"`
-	FirstFailure time.Time `json:"first_failure"`
-	Active       *Incident `json:"active,omitempty"`
+	Failures       int               `json:"failures"`
+	Recoveries     int               `json:"recoveries"`
+	FirstFailure   time.Time         `json:"first_failure"`
+	Active         *Incident         `json:"active,omitempty"`
+	FirstDiagnoses []model.Diagnosis `json:"first_diagnoses,omitempty"`
 }
 
 func Observe(ctx context.Context, store *storage.Store, r model.Report, source string, failureThreshold, recoveryThreshold int) (*Incident, error) {
+	unlock := store.LockState(r.HostID + ":" + r.SiteID + ":" + source)
+	defer unlock()
 	if failureThreshold < 1 {
 		failureThreshold = 3
 	}
@@ -53,6 +56,7 @@ func Observe(ctx context.Context, store *storage.Store, r model.Report, source s
 		state.Recoveries = 0
 		if state.Failures == 0 {
 			state.FirstFailure = r.ObservedAt
+			state.FirstDiagnoses = r.Diagnoses
 		}
 		state.Failures++
 		if state.Active == nil && state.Failures >= failureThreshold {
@@ -60,7 +64,15 @@ func Observe(ctx context.Context, store *storage.Store, r model.Report, source s
 			if _, err = rand.Read(bytes); err != nil {
 				return nil, err
 			}
-			incident := Incident{ID: "INC-" + hex.EncodeToString(bytes), HostID: r.HostID, SiteIDs: []string{r.SiteID}, Source: source, Status: "open", StartedAt: state.FirstFailure, Dependency: "site", Diagnoses: r.Diagnoses, Symptoms: []model.Check{}}
+			siteIDs := r.AffectedSiteIDs
+			if len(siteIDs) == 0 {
+				siteIDs = []string{r.SiteID}
+			}
+			dependency := r.Dependency
+			if dependency == "" {
+				dependency = "site"
+			}
+			incident := Incident{ID: "INC-" + hex.EncodeToString(bytes), HostID: r.HostID, SiteIDs: siteIDs, Source: source, Status: "open", StartedAt: state.FirstFailure, Dependency: dependency, Diagnoses: state.FirstDiagnoses, Symptoms: []model.Check{}}
 			for _, c := range r.Checks {
 				if c.State == model.Fail {
 					incident.Symptoms = append(incident.Symptoms, c)

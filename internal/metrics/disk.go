@@ -14,8 +14,9 @@ import (
 )
 
 type DiskEntry struct {
-	Path  string `json:"path"`
-	Bytes int64  `json:"bytes"`
+	Path    string `json:"path"`
+	Bytes   int64  `json:"bytes"`
+	Partial bool   `json:"partial"`
 }
 type DiskReport struct {
 	HostID      string              `json:"host_id"`
@@ -29,12 +30,16 @@ func Disk(ctx context.Context, runner platform.Runner, h config.Host) DiskReport
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	r := DiskReport{HostID: h.ID, ObservedAt: time.Now().UTC(), Directories: []DiskEntry{}, Docker: []map[string]string{}, Unavailable: []string{}}
-	for _, root := range []string{"/home/deploy/apps", "/var/lib/docker", "/var/log", "/tmp"} {
+	roots := h.DiskRoots
+	if len(roots) == 0 {
+		roots = []string{"/home/deploy/apps", "/var/lib/docker", "/var/log", "/tmp"}
+	}
+	for _, root := range roots {
 		data, err := runner.Run(ctx, "du", "-x", "-B1", "--max-depth=1", "--", root)
 		if err != nil {
 			r.Unavailable = append(r.Unavailable, root+": permission denied, unavailable or timed out")
-			continue
 		}
+		partial := err != nil
 		scanner := bufio.NewScanner(strings.NewReader(string(data)))
 		for scanner.Scan() {
 			size, path, ok := strings.Cut(scanner.Text(), "\t")
@@ -43,7 +48,7 @@ func Disk(ctx context.Context, runner platform.Runner, h config.Host) DiskReport
 			}
 			bytes, err := strconv.ParseInt(size, 10, 64)
 			if err == nil {
-				r.Directories = append(r.Directories, DiskEntry{Path: path, Bytes: bytes})
+				r.Directories = append(r.Directories, DiskEntry{Path: path, Bytes: bytes, Partial: partial})
 			}
 		}
 	}

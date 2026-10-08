@@ -36,6 +36,7 @@ func (b *boundedBuffer) Write(p []byte) (int, error) {
 
 func (r Command) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	includeStderr := name == "docker" && len(args) > 0 && args[0] == "logs"
+	partialAccounting := name == "du"
 	if r.Host.SSH != "" {
 		parts := []string{Quote(name)}
 		for _, arg := range args {
@@ -55,6 +56,9 @@ func (r Command) Run(ctx context.Context, name string, args ...string) ([]byte, 
 		// Do not echo arbitrary command stderr: it can contain application secrets.
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("inspection timed out or was cancelled")
+		}
+		if partialAccounting && !stdout.overflow {
+			return stdout.data, fmt.Errorf("directory accounting incomplete")
 		}
 		return nil, fmt.Errorf("inspection command failed (%s)", err)
 	}

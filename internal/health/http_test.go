@@ -24,3 +24,15 @@ func TestHTTPAndTLSDoNotAcceptFalseHealth(t *testing.T) {
 		t.Fatal("untrusted TLS accepted")
 	}
 }
+
+func TestUnconfiguredExternalEndpointIsUnknown(t *testing.T) {
+	r := External(context.Background(), config.Site{ID: "s", HostID: "h"})
+	if r.Overall != "unknown" || len(r.Checks) != 4 || r.Runtime.HostID != "h" {
+		t.Fatal(r)
+	}
+	for _, c := range r.Checks {
+		if c.State != model.Unknown {
+			t.Fatal(c)
+		}
+	}
+}

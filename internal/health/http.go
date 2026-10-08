@@ -34,6 +34,9 @@ func HTTP(ctx context.Context, s config.Site, rawURL, layer string) model.Check 
 		if req.URL.User != nil {
 			return fmt.Errorf("redirect credentials forbidden")
 		}
+		if len(via) > 0 && via[0].URL.Scheme == "https" && req.URL.Scheme != "https" {
+			return fmt.Errorf("HTTPS downgrade forbidden")
+		}
 		return nil
 	}}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -96,6 +99,9 @@ func Network(ctx context.Context, s config.Site) []model.Check {
 	checks := []model.Check{}
 	u, err := url.Parse(s.Health.PublicURL)
 	if err != nil || u.Hostname() == "" {
+		for _, layer := range []string{"dns", "tcp", "tls"} {
+			checks = append(checks, model.Check{HostID: s.HostID, SiteID: s.ID, Layer: layer, State: model.Unknown, Summary: "Public endpoint not configured"})
+		}
 		return checks
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout())
@@ -167,5 +173,5 @@ func Network(ctx context.Context, s config.Site) []model.Check {
 func External(ctx context.Context, s config.Site) model.Report {
 	checks := Network(ctx, s)
 	checks = append(checks, HTTP(ctx, s, s.Health.PublicURL, "public_http"))
-	return model.Report{HostID: s.HostID, SiteID: s.ID, Name: s.Name, ObservedAt: time.Now().UTC(), Vantage: "external watcher (deploy separately from production)", Overall: model.Overall(checks), Checks: checks, Diagnoses: []model.Diagnosis{}}
+	return model.Report{HostID: s.HostID, SiteID: s.ID, Name: s.Name, ObservedAt: time.Now().UTC(), Vantage: "external watcher (deploy separately from production)", Runtime: model.Runtime{HostID: s.HostID, SiteID: s.ID, Type: "external", Status: "not_applicable"}, Overall: model.Overall(checks), Checks: checks, Diagnoses: []model.Diagnosis{}}
 }

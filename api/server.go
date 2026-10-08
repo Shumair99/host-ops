@@ -15,6 +15,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/diagnostics"
 	"github.com/Shumair99/host-ops/internal/incidents"
 	"github.com/Shumair99/host-ops/internal/logs"
+	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
 	"github.com/Shumair99/host-ops/internal/security"
@@ -61,6 +62,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/security", s.security)
 	mux.HandleFunc("GET /api/costs", s.costs)
 	mux.HandleFunc("GET /api/capacity", s.capacity)
+	mux.HandleFunc("GET /api/disk", func(w http.ResponseWriter, r *http.Request) {
+		JSON(w, 200, metrics.Disk(r.Context(), platform.Command{Host: s.Config.Host}, s.Config.Host))
+	})
 	mux.HandleFunc("GET /api/recovery", s.recovery)
 	mux.HandleFunc("GET /api/sites/{site}/recovery", s.recovery)
 	mux.HandleFunc("POST /api/backups", s.backup)
@@ -88,13 +92,27 @@ func (s *Server) Handler() http.Handler {
 			JSON(w, 200, nil)
 			return
 		}
-		JSON(w, 200, records[0].Data)
+		var sample metrics.Sample
+		if err := json.Unmarshal(records[0].Data, &sample); err != nil {
+			Error(w, 500, "Host sample invalid")
+			return
+		}
+		maxAge := s.MaxAge
+		if maxAge == 0 {
+			maxAge = 3 * time.Minute
+		}
+		if time.Since(sample.ObservedAt) > maxAge {
+			sample.Values = map[string]float64{}
+			sample.Unavailable = append(sample.Unavailable, "host observations are stale")
+		}
+		JSON(w, 200, sample)
 	})
 	mux.HandleFunc("GET /api/events", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "event") })
 	mux.HandleFunc("GET /api/changes", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "change") })
 	mux.HandleFunc("GET /api/deployments", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "deployment") })
 	mux.HandleFunc("POST /api/deployments", s.deployment)
-	mux.HandleFunc("GET /api/incidents", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "incident") })
+	mux.HandleFunc("GET /api/incidents", s.incidentList)
+	mux.HandleFunc("GET /api/incidents/{incident}/capsule", s.capsule)
 	mux.HandleFunc("GET /api/external", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "external_health") })
 	mux.HandleFunc("POST /api/observations", s.observations)
 	mux.HandleFunc("GET /api/sites/{site}/logs", func(w http.ResponseWriter, r *http.Request) {
@@ -115,7 +133,7 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 		if strings.HasPrefix(r.URL.Path, "/api/") {
-			if len(s.Token) < 32 || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")), []byte(s.Token)) != 1 {
+			if len(s.Token) < 32 || !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")), []byte(s.Token)) != 1 {
 				Error(w, 401, "Authentication required")
 				return
 			}
@@ -234,11 +252,19 @@ func (s *Server) deployment(w http.ResponseWriter, r *http.Request) {
 func (s *Server) observations(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 256*1024)
 	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
 	var reports []model.Report
 	if decoder.Decode(&reports) != nil || len(reports) == 0 || len(reports) > len(s.Config.Sites) {
 		Error(w, 400, "Invalid observation batch")
 		return
 	}
+	var extra any
+	if decoder.Decode(&extra) != io.EOF {
+		Error(w, 400, "Expected one observation batch")
+		return
+	}
+	unlock := s.Store.LockState(s.Config.Host.ID + ":observation-batch")
+	defer unlock()
 	seen := map[string]bool{}
 	for i := range reports {
 		report := &reports[i]
@@ -251,15 +277,31 @@ func (s *Server) observations(w http.ResponseWriter, r *http.Request) {
 		report.HostID = s.Config.Host.ID
 		report.Name = sites[0].Name
 		report.Vantage = "external watcher report"
-		report.Runtime = model.Runtime{}
+		report.Runtime = model.Runtime{HostID: report.HostID, SiteID: report.SiteID, Type: "external", Status: "not_applicable"}
+		report.Dependency = ""
+		report.AffectedSiteIDs = nil
+		layers := map[string]bool{}
 		for j := range report.Checks {
 			check := &report.Checks[j]
 			if check.Layer != "dns" && check.Layer != "tcp" && check.Layer != "tls" && check.Layer != "public_http" {
 				Error(w, 400, "Invalid external check layer")
 				return
 			}
+			if layers[check.Layer] {
+				Error(w, 400, "Duplicate external check layer")
+				return
+			}
+			layers[check.Layer] = true
 			if check.State != model.Pass && check.State != model.Fail && check.State != model.Warn && check.State != model.Unknown && check.State != model.Skip {
 				Error(w, 400, "Invalid check state")
+				return
+			}
+			if check.State == model.Skip && (check.Layer != "tls" || strings.HasPrefix(sites[0].Health.PublicURL, "https:")) {
+				Error(w, 400, "Check cannot be skipped")
+				return
+			}
+			if check.Layer == "public_http" && check.State == model.Pass && check.StatusCode != sites[0].Health.ExpectedStatus {
+				Error(w, 400, "Passing HTTP check must match expected status")
 				return
 			}
 			if len(check.Summary) > 512 {
@@ -270,18 +312,29 @@ func (s *Server) observations(w http.ResponseWriter, r *http.Request) {
 			check.HostID = report.HostID
 			check.SiteID = report.SiteID
 		}
+		if len(layers) != 4 {
+			Error(w, 400, "DNS, TCP, TLS and public HTTP checks are required")
+			return
+		}
 		report.Overall = model.Overall(report.Checks)
 		report.Diagnoses = diagnostics.Diagnose(*report)
 	}
+	newReports := []model.Report{}
 	for _, report := range reports {
-		if _, err := s.Store.Add(r.Context(), report.HostID, report.SiteID, "external_health", report.ObservedAt, report); err != nil {
+		created, err := s.Store.AddOnce(r.Context(), report.HostID, report.SiteID, "external_health", report.SiteID+":"+report.ObservedAt.UTC().Format(time.RFC3339Nano), report.ObservedAt, report)
+		if err != nil {
 			Error(w, 500, "Observation store unavailable")
 			return
 		}
+		if created {
+			newReports = append(newReports, report)
+		}
+	}
+	for _, report := range incidents.GroupReports(s.Config, newReports, "watcher") {
 		if _, err := incidents.Observe(r.Context(), s.Store, report, "watcher", 3, 2); err != nil {
 			Error(w, 500, "Incident store unavailable")
 			return
 		}
 	}
-	JSON(w, 202, map[string]int{"accepted": len(reports)})
+	JSON(w, 202, map[string]int{"accepted": len(newReports)})
 }

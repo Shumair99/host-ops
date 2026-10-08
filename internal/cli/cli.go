@@ -32,6 +32,7 @@ Commands:
   logs <site>       Read a bounded, redacted runtime log stream
   diff [site]       Read infrastructure changes (--since 24h)
   incidents         Read persisted outage and recovery evidence
+  capsule <incident> Export a redacted incident evidence bundle as JSON
   readiness [site]  Explain the production readiness score
   security          Inspect posture, publications and listening sockets
   orphans           Review possible stopped/unregistered resource candidates
@@ -55,7 +56,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 0
 	}
 	command := args[0]
-	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" && command != "security" && command != "orphans" && command != "ownership" && command != "costs" && command != "capacity" && command != "recovery" && command != "impact" && command != "preflight" {
+	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" && command != "security" && command != "orphans" && command != "ownership" && command != "costs" && command != "capacity" && command != "recovery" && command != "impact" && command != "preflight" && command != "capsule" {
 		fmt.Fprintf(errOut, "unknown command %q\n", command)
 		return 1
 	}
@@ -91,7 +92,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	selectionID := id
-	if command == "ownership" || command == "impact" || command == "preflight" {
+	if command == "ownership" || command == "impact" || command == "preflight" || command == "capsule" {
 		selectionID = ""
 	}
 	sites, err := c.Select(selectionID)
@@ -101,7 +102,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
-	if command == "metrics" || command == "history" || command == "disk" || command == "events" || command == "deployments" || command == "logs" || command == "diff" || command == "incidents" || command == "readiness" || command == "security" || command == "orphans" || command == "ownership" || command == "costs" || command == "capacity" || command == "recovery" || command == "impact" || command == "preflight" {
+	if command == "metrics" || command == "history" || command == "disk" || command == "events" || command == "deployments" || command == "logs" || command == "diff" || command == "incidents" || command == "readiness" || command == "security" || command == "orphans" || command == "ownership" || command == "costs" || command == "capacity" || command == "recovery" || command == "impact" || command == "preflight" || command == "capsule" {
 		return query(ctx, c, command, id, *db, *since, out, errOut)
 	}
 	if command == "sites" {

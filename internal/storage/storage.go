@@ -7,13 +7,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/Shumair99/host-ops/internal/model"
 	_ "modernc.org/sqlite"
 )
 
-type Store struct{ DB *sql.DB }
+type Store struct {
+	DB      *sql.DB
+	stateMu sync.Mutex
+	locks   map[string]*sync.Mutex
+}
 
 const timestampLayout = "2006-01-02T15:04:05.000000000Z"
 
@@ -59,6 +64,21 @@ CREATE TABLE IF NOT EXISTS state (host_id TEXT NOT NULL, site_id TEXT NOT NULL, 
 }
 
 func (s *Store) Close() error { return s.DB.Close() }
+
+func (s *Store) LockState(key string) func() {
+	s.stateMu.Lock()
+	if s.locks == nil {
+		s.locks = map[string]*sync.Mutex{}
+	}
+	lock := s.locks[key]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		s.locks[key] = lock
+	}
+	s.stateMu.Unlock()
+	lock.Lock()
+	return lock.Unlock
+}
 
 func (s *Store) Add(ctx context.Context, host, site, kind string, at time.Time, value any) (int64, error) {
 	if host == "" || kind == "" {
@@ -144,8 +164,32 @@ func (s *Store) Query(ctx context.Context, host, site, kind string, since time.T
 }
 
 func (s *Store) Retain(ctx context.Context, age time.Duration) error {
-	_, err := s.DB.ExecContext(ctx, `DELETE FROM records WHERE kind IN ('health','metrics','host_metrics','snapshot') AND observed_at<? AND id NOT IN (SELECT max(id) FROM records GROUP BY host_id,site_id,kind)`, time.Now().Add(-age).UTC().Format(timestampLayout))
+	_, err := s.DB.ExecContext(ctx, `DELETE FROM records WHERE kind IN ('health','external_health','metrics','host_metrics','snapshot') AND observed_at<? AND id NOT IN (SELECT max(id) FROM records GROUP BY host_id,site_id,kind)`, time.Now().Add(-age).UTC().Format(timestampLayout))
 	return err
+}
+
+// LatestEntities retains open incidents regardless of how long ago they began.
+func (s *Store) LatestEntities(ctx context.Context, host, kind string) ([]Record, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,host_id,site_id,kind,observed_at,data FROM records WHERE id IN (SELECT max(id) FROM records WHERE host_id=? AND kind=? GROUP BY json_extract(data,'$.id')) ORDER BY id DESC LIMIT 1000`, host, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	records := []Record{}
+	for rows.Next() {
+		var r Record
+		var at, data string
+		if err = rows.Scan(&r.ID, &r.HostID, &r.SiteID, &r.Kind, &at, &data); err != nil {
+			return nil, err
+		}
+		r.ObservedAt, err = time.Parse(time.RFC3339Nano, at)
+		if err != nil {
+			return nil, err
+		}
+		r.Data = json.RawMessage(data)
+		records = append(records, r)
+	}
+	return records, rows.Err()
 }
 
 func (s *Store) AddOnce(ctx context.Context, host, site, kind, key string, at time.Time, value any) (bool, error) {

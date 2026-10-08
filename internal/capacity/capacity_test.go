@@ -14,3 +14,12 @@ func TestSparseHistoryDoesNotInventForecast(t *testing.T) {
 		t.Fatal(r)
 	}
 }
+
+func TestEmptyOrStaleSamplesCannotPass(t *testing.T) {
+	now := time.Now()
+	for _, s := range []metrics.Sample{{ObservedAt: now, Values: map[string]float64{}}, {ObservedAt: now.Add(-time.Hour), Values: map[string]float64{"disk_percent": 20}}} {
+		if Evaluate("h", []metrics.Sample{s}, now).State != model.Unknown {
+			t.Fatal("missing evidence passed")
+		}
+	}
+}

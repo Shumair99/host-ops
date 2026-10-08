@@ -27,3 +27,7 @@ bin/hostops-agent --config local/hostops.json --db local/hostops.db
 ```
 
 Open http://127.0.0.1:9090 and enter the token. Use `host.ssh` to inspect a remote Linux host without installing HostOps there. See [security](docs/security.md), [diagnostics](docs/diagnostics.md), [monitoring](docs/monitoring.md) and the [isolated Docker demo](demo/README.md).
+
+On Windows, `./scripts/check.ps1` builds and checks the project, and `./scripts/dev.ps1` starts the local workspace. The dashboard's Host page can inspect application directories and Docker disk usage on demand. Configure `host.disk_roots` for another directory layout. No cleanup runs automatically.
+
+Readiness, recovery evidence, exposure, cost allocation, capacity, maintenance preflight and dependency impact are available in both the CLI and dashboard. [Incident capsules](docs/incidents.md) capture redacted evidence for investigation. Missing costs, backup verification and independent monitoring remain unknown until real evidence is supplied.

@@ -6,6 +6,8 @@ func TestUnsafeManifestIsRejected(t *testing.T) {
 	base := Config{Host: Host{ID: "h"}, Sites: []Site{{ID: "s", HostID: "h", Name: "S", Runtime: Runtime{Type: "docker", Container: "s"}}}}
 	for _, mutate := range []func(*Config){
 		func(c *Config) { c.Host.SSH = "-oProxyCommand=evil" },
+		func(c *Config) { c.Host.CaddyAdminURL = "http://user:secret@127.0.0.1:2019" },
+		func(c *Config) { c.Sites[0].Recovery.RPOhours = -1 },
 		func(c *Config) { c.Sites[0].Runtime.Container = "s; touch /tmp/pwned" },
 		func(c *Config) { c.Sites[0].Health.PublicURL = "https://user:secret@example.com/" },
 		func(c *Config) {

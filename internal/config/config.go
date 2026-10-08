@@ -29,6 +29,7 @@ type Host struct {
 	MonthlyBackupCost float64     `json:"monthly_backup_cost,omitempty"`
 	CostWeights       CostWeights `json:"cost_weights,omitempty"`
 	Currency          string      `json:"currency,omitempty"`
+	DiskRoots         []string    `json:"disk_roots,omitempty"`
 }
 
 type CostWeights struct {
@@ -117,6 +118,21 @@ func (c *Config) Validate() error {
 	if c.Host.CaddyContainer != "" && !identifier.MatchString(c.Host.CaddyContainer) {
 		return fmt.Errorf("invalid Caddy container")
 	}
+	if len(c.Host.DiskRoots) > 16 {
+		return fmt.Errorf("at most 16 disk roots may be configured")
+	}
+	for _, root := range c.Host.DiskRoots {
+		if !strings.HasPrefix(root, "/") || strings.ContainsRune(root, '\x00') || strings.ContainsAny(root, "\r\n") {
+			return fmt.Errorf("disk roots must be absolute Linux paths")
+		}
+	}
+	if c.Host.CaddyAdminURL != "" {
+		u, err := url.Parse(c.Host.CaddyAdminURL)
+		if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") || (u.Path != "" && u.Path != "/") {
+			return fmt.Errorf("Caddy admin URL must be an HTTP(S) origin without credentials")
+		}
+		c.Host.CaddyAdminURL = strings.TrimSuffix(c.Host.CaddyAdminURL, "/")
+	}
 	if c.Host.MonthlyCost < 0 {
 		return fmt.Errorf("host cost cannot be negative")
 	}
@@ -140,6 +156,9 @@ func (c *Config) Validate() error {
 	seen := map[string]bool{}
 	for i := range c.Sites {
 		s := &c.Sites[i]
+		if s.Recovery.RTOminutes < 0 || s.Recovery.RTOminutes > 525600 || s.Recovery.RPOhours < 0 || s.Recovery.RPOhours > 8760 {
+			return fmt.Errorf("site %s: recovery targets must be between zero and one year", s.ID)
+		}
 		if s.Business.MonthlyFee < 0 {
 			return fmt.Errorf("site %s: hosting fee cannot be negative", s.ID)
 		}

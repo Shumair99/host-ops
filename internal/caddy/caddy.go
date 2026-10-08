@@ -19,12 +19,12 @@ func Upstreams(data []byte, domain string) ([]string, bool, error) {
 		return nil, false, err
 	}
 	seen, found := map[string]bool{}, false
-	var walk func(any, bool)
-	walk = func(node any, matches bool) {
+	var walk func(any, bool, bool)
+	walk = func(node any, allowed, matches bool) {
 		switch n := node.(type) {
 		case []any:
 			for _, child := range n {
-				walk(child, matches)
+				walk(child, allowed, matches)
 			}
 		case map[string]any:
 			if matchers, ok := n["match"].([]any); ok {
@@ -42,13 +42,14 @@ func Upstreams(data []byte, domain string) ([]string, bool, error) {
 					}
 				}
 				if hasHost {
-					matches = hostMatches
-					if matches {
+					allowed = allowed && hostMatches
+					matches = matches || hostMatches
+					if allowed && matches {
 						found = true
 					}
 				}
 			}
-			if matches && n["handler"] == "reverse_proxy" {
+			if allowed && matches && n["handler"] == "reverse_proxy" {
 				if list, ok := n["upstreams"].([]any); ok {
 					for _, u := range list {
 						if object, ok := u.(map[string]any); ok {
@@ -61,12 +62,12 @@ func Upstreams(data []byte, domain string) ([]string, bool, error) {
 			}
 			for key, child := range n {
 				if key != "match" && key != "upstreams" {
-					walk(child, matches)
+					walk(child, allowed, matches)
 				}
 			}
 		}
 	}
-	walk(root, false)
+	walk(root, true, false)
 	upstreams := []string{}
 	for u := range seen {
 		upstreams = append(upstreams, u)

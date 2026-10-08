@@ -27,6 +27,8 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store, failures,
 		if _, err := store.Add(ctx, r.HostID, r.SiteID, "external_health", r.ObservedAt, r); err != nil {
 			return nil, err
 		}
+	}
+	for _, r := range incidents.GroupReports(c, reports, "watcher") {
 		incident, err := incidents.Observe(ctx, store, r, "watcher", failures, recoveries)
 		if err != nil {
 			return nil, err
@@ -41,7 +43,7 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store, failures,
 			}
 		}
 	}
-	return reports, nil
+	return reports, store.Retain(ctx, 90*24*time.Hour)
 }
 
 func Publish(ctx context.Context, endpoint, token string, reports []model.Report) error {

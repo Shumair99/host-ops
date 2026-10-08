@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useResource } from './api'
+import { useEffect, useRef, useState } from 'react'
+import { request, useResource } from './api'
 import { Readiness } from './insights'
 import { Badge, Chain, Empty, ErrorBox, Gauge, Loading, Panel, bytes, date, time } from './ui'
 import type { Dashboard, EvidenceRecord, Report, Site } from './types'
@@ -48,7 +48,7 @@ const recordRoutes: Record<string, { title: string; note: string; endpoint: stri
 export function Records({ page, token, site }: { page: string; token: string; site?: string }) {
   const descriptor = recordRoutes[page] || recordRoutes.monitoring
   const { value, loading, error } = useResource<EvidenceRecord[]>(`/api/${descriptor.endpoint}${site ? `?site=${encodeURIComponent(site)}` : ''}`, token)
-  return <Panel title={descriptor.title} note={descriptor.note}>{loading ? <Loading /> : error ? <ErrorBox message={error} /> : value?.length ? <div className="record-list">{value.map(record => <article className="record" key={record.id}><div className="record-meta"><time>{date(record.observed_at)}</time><span>{record.site_id || record.host_id}</span><span>#{record.id}</span></div><h3>{String(record.data.finding || record.data.field || record.data.status || record.data.type || record.data.overall || record.kind).replaceAll('_', ' ')}</h3>{record.data.before !== undefined ? <div className="diff-values"><code>− {String(record.data.before) || '(unobserved)'}</code><code>+ {String(record.data.after) || '(unobserved)'}</code></div> : <pre>{JSON.stringify(record.data, null, 2)}</pre>}</article>)}</div> : <Empty title="No records in this window" text="Records appear after the agent observes a change, receives a deployment notification or confirms an incident." />}</Panel>
+  return <Panel title={descriptor.title} note={descriptor.note}>{loading ? <Loading /> : error ? <ErrorBox message={error} /> : value?.length ? <div className="record-list">{value.map(record => <article className="record" key={record.id}><div className="record-meta"><time>{date(record.observed_at)}</time><span>{record.site_id || record.host_id}</span><span>#{record.id}</span></div>{page === 'incidents' ? <CapsuleDownload id={String(record.data.id)} token={token} /> : null}<h3>{String(record.data.finding || record.data.field || record.data.status || record.data.type || record.data.overall || record.kind).replaceAll('_', ' ')}</h3>{record.data.before !== undefined ? <div className="diff-values"><code>− {String(record.data.before) || '(unobserved)'}</code><code>+ {String(record.data.after) || '(unobserved)'}</code></div> : <pre>{JSON.stringify(record.data, null, 2)}</pre>}</article>)}</div> : <Empty title="No records in this window" text="Records appear after the agent observes a change, receives a deployment notification or confirms an incident." />}</Panel>
 }
 
 function LogStream({ site, token }: { site: Site; token: string }) { const { value, loading, error } = useResource<{ text: string }>(`/api/sites/${encodeURIComponent(site.id)}/logs`, token); return <Panel title="Runtime logs" note="Latest 200 lines, with common credential patterns redacted. Review before sharing.">{loading ? <Loading /> : error ? <ErrorBox message={error} /> : <pre className="log-stream">{value?.text || 'No log output.'}</pre>}</Panel> }
@@ -60,4 +60,28 @@ export function Property({ site, report, token }: { site: Site; report?: Report;
   </>
 }
 
-export function Host({ data }: { data: Dashboard }) { return <><Panel title="Host observations" note={data.host ? `Measured ${date(data.host.observed_at)}` : 'No host measurements yet'}><div className="host-gauges"><Gauge label="CPU" value={data.host?.values.cpu_percent} /><Gauge label="Memory" value={data.host?.values.memory_percent} /><Gauge label="Root disk" value={data.host?.values.disk_percent} /></div><dl className="passport">{Object.entries(data.host?.values || {}).map(([key, value]) => <div key={key}><dt>{key.replaceAll('_', ' ')}</dt><dd className="mono">{key.endsWith('_bytes') ? bytes(value) : value.toFixed(2)}</dd></div>)}</dl>{data.host?.unavailable.length ? <ErrorBox message={`Unavailable: ${data.host.unavailable.join(', ')}`} /> : null}</Panel><Panel title="Disk investigation" note="Read-only accounting. No cleanup is run by HostOps."><p className="padded">Run <code>hostops disk --config local/hostops.json</code> to inspect application storage, Docker, logs and temporary files. Directory totals overlap child entries. Review ownership and recovery requirements before removing anything.</p></Panel></> }
+export function Host({ data, token }: { data: Dashboard; token: string }) { return <><Panel title="Host observations" note={data.host ? `Measured ${date(data.host.observed_at)}` : 'No host measurements yet'}><div className="host-gauges"><Gauge label="CPU" value={data.host?.values.cpu_percent} /><Gauge label="Memory" value={data.host?.values.memory_percent} /><Gauge label="Root disk" value={data.host?.values.disk_percent} /></div><dl className="passport">{Object.entries(data.host?.values || {}).map(([key, value]) => <div key={key}><dt>{key.replaceAll('_', ' ')}</dt><dd className="mono">{key.endsWith('_bytes') ? bytes(value) : value.toFixed(2)}</dd></div>)}</dl>{data.host?.unavailable.length ? <ErrorBox message={`Unavailable: ${data.host.unavailable.join(', ')}`} /> : null}</Panel><DiskInvestigation token={token} /></> }
+
+function CapsuleDownload({ id, token }: { id: string; token: string }) {
+  const [busy, setBusy] = useState(false); const [error, setError] = useState('')
+  async function download() {
+    setBusy(true); setError('')
+    try { const capsule = await request<unknown>('/api/incidents/' + encodeURIComponent(id) + '/capsule', token); const url = URL.createObjectURL(new Blob([JSON.stringify(capsule, null, 2)], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = 'hostops-' + id + '.json'; link.click(); URL.revokeObjectURL(url) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Export unavailable.') }
+    finally { setBusy(false) }
+  }
+  return <><button onClick={() => void download()} disabled={busy}>{busy ? 'Preparing…' : 'Download evidence capsule ↗'}</button>{error ? <ErrorBox message={error} /> : null}</>
+}
+
+interface DiskReport { observed_at: string; directories: { path: string; bytes: number; partial: boolean }[]; docker: Record<string, string>[]; unavailable: string[] }
+function DiskInvestigation({ token }: { token: string }) {
+  const [value, setValue] = useState<DiskReport | null>(null); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const controller = useRef<AbortController | null>(null)
+  useEffect(() => () => controller.current?.abort(), [])
+  async function inspect() {
+    controller.current?.abort(); const active = new AbortController(); controller.current = active; setBusy(true); setError('')
+    try { const result = await request<DiskReport>('/api/disk', token, active.signal); if (!active.signal.aborted) setValue(result) }
+    catch (cause) { if (!active.signal.aborted) setError(cause instanceof Error ? cause.message : 'Disk inspection unavailable.') }
+    finally { if (!active.signal.aborted) setBusy(false) }
+  }
+  return <Panel title="Disk investigation" note="On-demand, read-only accounting. Directory totals overlap child entries." action={<button disabled={busy} onClick={() => void inspect()}>{busy ? 'Inspecting…' : 'Inspect disk usage ↗'}</button>}><p className="padded">Inspect application storage, Docker, logs and temporary files. Permission limits are shown explicitly. Review ownership and recovery requirements before removing anything.</p>{error ? <ErrorBox message={error} /> : null}{value ? <><p className="padded muted">Observed {date(value.observed_at)}</p><dl className="passport">{value.directories.map(entry => <div key={entry.path}><dt>{entry.path}</dt><dd className="mono">{entry.partial ? "≥ " : ""}{bytes(entry.bytes)}{entry.partial ? " (incomplete)" : ""}</dd></div>)}</dl>{value.docker.length ? <div className="table-scroll"><table className="fleet-table"><thead><tr><th>Docker storage</th><th>Size</th><th>Potentially reclaimable</th></tr></thead><tbody>{value.docker.map((entry, index) => <tr key={index}><td>{entry.Type}</td><td>{entry.Size}</td><td>{entry.Reclaimable || 'Unknown'}</td></tr>)}</tbody></table></div> : null}{value.unavailable.length ? <ErrorBox message={'Unavailable: ' + value.unavailable.join('; ')} /> : null}</> : null}</Panel>
+}

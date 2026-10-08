@@ -3,6 +3,7 @@ package readiness
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/Shumair99/host-ops/internal/config"
@@ -91,7 +92,8 @@ func Evaluate(site config.Site, r model.Report, ev Evidence, now time.Time) Asse
 		}
 		return model.Fail
 	}
-	add("user", "Security", "Non-root configured user", security(r.Runtime.User != "" && r.Runtime.User != "root" && r.Runtime.User != "0"), 5, "Configured user: "+r.Runtime.User, "Review the image's configured runtime user.", 2)
+	user := strings.Split(r.Runtime.User, ":")[0]
+	add("user", "Security", "Non-root configured user", security(user != "" && user != "root" && user != "0"), 5, "Configured user: "+r.Runtime.User, "Review the image's configured runtime user.", 2)
 	add("privileged", "Security", "Container not privileged", security(!r.Runtime.Privileged), 5, "Docker privileged flag observed", "Remove unnecessary privileged execution after reviewing dependencies.", 1)
 	add("memory_limit", "Security", "Memory limit configured", security(r.Runtime.MemoryLimit > 0), 5, "Docker memory limit observed", "Set a suitable memory limit through the existing Compose configuration.", 2)
 	check("tls", "Security", "TLS verified", "tls", 5)

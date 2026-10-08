@@ -14,9 +14,17 @@ import (
 )
 
 type Config struct {
-	Host  Host   `json:"host"`
-	Sites []Site `json:"sites"`
+	Host      Host      `json:"host"`
+	Sites     []Site    `json:"sites"`
+	Discovery Discovery `json:"discovery,omitempty"`
 }
+
+type Discovery struct {
+	Disabled      bool   `json:"disabled,omitempty"`
+	CollectorFile string `json:"collector_file,omitempty"`
+}
+
+func (c Config) Discovering() bool { return !c.Discovery.Disabled }
 
 type Host struct {
 	ID                string      `json:"id"`
@@ -39,6 +47,7 @@ type CostWeights struct {
 }
 
 type Site struct {
+	Discovered bool     `json:"discovered,omitempty"`
 	ID         string   `json:"id"`
 	HostID     string   `json:"host_id"`
 	Name       string   `json:"name"`
@@ -68,6 +77,7 @@ type Proxy struct {
 }
 
 type Health struct {
+	Automatic      bool   `json:"automatic,omitempty"`
 	Path           string `json:"path"`
 	PublicURL      string `json:"public_url,omitempty"`
 	LocalURL       string `json:"local_url,omitempty"`
@@ -150,7 +160,7 @@ func (c *Config) Validate() error {
 	if c.Host.MonthlyCost+c.Host.MonthlyBackupCost > 0 && c.Host.Currency == "" {
 		return fmt.Errorf("configured costs require a currency")
 	}
-	if len(c.Sites) == 0 {
+	if len(c.Sites) == 0 && c.Discovery.Disabled {
 		return fmt.Errorf("manifest must register at least one site")
 	}
 	seen := map[string]bool{}
@@ -196,7 +206,7 @@ func (c *Config) Validate() error {
 		default:
 			return fmt.Errorf("site %s: unsupported runtime %q", s.ID, s.Runtime.Type)
 		}
-		if s.Health.ExpectedStatus == 0 {
+		if s.Health.ExpectedStatus == 0 && !s.Health.Automatic {
 			s.Health.ExpectedStatus = 200
 		}
 		if s.Health.TimeoutSeconds == 0 {
@@ -205,7 +215,7 @@ func (c *Config) Validate() error {
 		if s.Health.TimeoutSeconds < 1 || s.Health.TimeoutSeconds > 60 {
 			return fmt.Errorf("site %s: timeout must be 1..60 seconds", s.ID)
 		}
-		if s.Health.ExpectedStatus < 100 || s.Health.ExpectedStatus > 599 {
+		if (!s.Health.Automatic && s.Health.ExpectedStatus < 100) || s.Health.ExpectedStatus > 599 {
 			return fmt.Errorf("site %s: invalid expected HTTP status", s.ID)
 		}
 		if s.Health.Path == "" {

@@ -407,6 +407,7 @@ func HelpLines() []string {
 		"Fleet columns expand with terminal width; all six checks remain in the inspector.",
 		"Meters use measured 0-100% utilization; a dash means no measurement.",
 		"Sparklines use relative scale; Host history has percent axes and actual timestamps.",
+		"Trend bars use full/half blocks; _ is a measured zero and blanks are missing samples.",
 		"Retained host history is sampled every 15s; blank chart columns are gaps.",
 		"Property metrics cover associated workloads; shared backends are not unique usage.",
 		"Property CPU may exceed 100% when workloads use several cores.",

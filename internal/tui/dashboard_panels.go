@@ -84,7 +84,9 @@ func (m dashboard) resourcePanels(w int) []string {
 		if s.key == "disk_percent" {
 			detail = "Available " + m.byteValue("disk_free_bytes")
 		}
-		rows := []string{t.strong(percent(n), c) + "  " + t.paint("used", muted), t.meter(n, inside, c), t.paint(detail, muted), m.spark(s.key, inside, c), t.paint("Trend / relative scale", muted)}
+		rows := []string{t.strong(percent(n), c) + "  " + t.paint("used", muted), t.meter(n, inside, c), t.paint(detail, muted)}
+		rows = append(rows, m.spark(s.key, inside, c)...)
+		rows = append(rows, t.paint("Trend / relative scale", muted))
 		cards = append(cards, t.panel(s.label, rows, sizes[i]))
 	}
 	return columns(columns(cards[0], cards[1], sizes[0], sizes[1]), cards[2], sizes[0]+sizes[1]+1, sizes[2])
@@ -96,32 +98,60 @@ func (m dashboard) byteValue(key string) string {
 	return "—"
 }
 func (m dashboard) bytePair(a, b string) string { return m.byteValue(a) + " / " + m.byteValue(b) }
-func (m dashboard) spark(key string, width, color int) string {
+func (m dashboard) spark(key string, width, color int) []string {
 	samples := m.snapshot.History
 	if len(samples) < 2 {
-		return m.theme.paint("Trend awaiting samples", muted)
+		return []string{m.theme.paint("Awaiting history", muted), ""}
 	}
 	buckets := timeBuckets(samples, key, width)
 	peak := 0.0
+	count := 0
 	for _, v := range buckets {
 		if v != nil {
 			peak = max(peak, *v)
+			count++
 		}
 	}
-	glyphs := []rune("▁▂▃▄▅▆▇█")
-	var b strings.Builder
-	for _, v := range buckets {
-		if v == nil {
-			b.WriteRune(' ')
-			continue
-		}
-		level := 0
-		if peak > 0 {
-			level = int(math.Round(max(0, *v) / peak * 7))
-		}
-		b.WriteRune(glyphs[min(7, level)])
+	if count == 0 {
+		return []string{m.theme.paint("No measured values", muted), ""}
 	}
-	return m.theme.paint(b.String(), color)
+	rows := barPlot(buckets, 2, peak)
+	for i := range rows {
+		rows[i] = m.theme.paint(rows[i], color)
+	}
+	return rows
+}
+
+// Full and half blocks are supported by Consolas, Lucida Console and Cascadia
+// Mono. Stacking them avoids the fractional glyphs absent in classic consoles.
+// A measured zero has an ASCII baseline; a missing observation remains blank.
+func barPlot(buckets []*float64, height int, ceiling float64) []string {
+	height = max(1, height)
+	rows := make([]string, height)
+	for row := range rows {
+		y := height - row - 1
+		var b strings.Builder
+		for _, v := range buckets {
+			glyph := ' '
+			if v != nil {
+				level := 0
+				if *v > 0 && ceiling > 0 {
+					level = max(1, int(math.Round(math.Min(1, *v/ceiling)*float64(height*2))))
+				}
+				switch {
+				case level >= 2*y+2:
+					glyph = '█'
+				case level > 2*y:
+					glyph = '▄'
+				case level == 0 && y == 0:
+					glyph = '_'
+				}
+			}
+			b.WriteRune(glyph)
+		}
+		rows[row] = b.String()
+	}
+	return rows
 }
 
 // Timestamp buckets preserve actual spacing and holes in the retained history.
@@ -168,25 +198,14 @@ func (m dashboard) trendPanel(label, key string, color, w int) []string {
 	}
 	ceiling := max(1.0, math.Ceil(peak/10)*10)
 	rows := []string{}
-	for y := 3; y >= 0; y-- {
-		var b strings.Builder
-		for _, v := range buckets {
-			glyph := " "
-			if v != nil && *v >= float64(y)*ceiling/4 {
-				glyph = "▂"
-				if *v >= float64(y+1)*ceiling/4 {
-					glyph = "█"
-				}
-			}
-			b.WriteString(glyph)
-		}
+	for row, plot := range barPlot(buckets, 4, ceiling) {
 		axis := "     "
-		if y == 3 {
+		if row == 0 {
 			axis = fmt.Sprintf("%4.0f%%", ceiling)
-		} else if y == 0 {
+		} else if row == 3 {
 			axis = "   0%"
 		}
-		rows = append(rows, m.theme.paint(axis+" │", muted)+m.theme.paint(b.String(), color))
+		rows = append(rows, m.theme.paint(axis+" │", muted)+m.theme.paint(plot, color))
 	}
 	first, last := samples[0].ObservedAt, samples[len(samples)-1].ObservedAt
 	rows = append(rows, m.theme.paint("       "+first.Local().Format("15:04")+strings.Repeat(" ", max(1, plotWidth-10))+last.Local().Format("15:04"), muted))

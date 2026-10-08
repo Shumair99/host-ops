@@ -84,7 +84,7 @@ The live root disk was measured at 88% used during verification. Open `d` to ins
 | F5 | Request inventory refresh and public checks |
 | `z` | Inventory, source coverage, routes and workloads |
 | `l`, `a`, `b` from property | Logs, site readiness, site recovery |
-| Esc | Return from an inspector to Sites; cancel input, clear site filter or focus menu |
+| Esc | Return from an inspector to Sites or an optional tool to Tools; cancel input, clear site filter or focus menu |
 | `w` on Incidents | Export newest listed incident capsule |
 | `t` in demo | Toggle fictional outage/recovery |
 | `?` | Help |

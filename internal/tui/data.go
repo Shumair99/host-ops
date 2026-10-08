@@ -374,7 +374,7 @@ func HelpLines() []string {
 		"Space: refresh in the background (Disk scans on demand)",
 		"F5: request inventory refresh and public checks",
 		"z: inventory sources, routes, workloads and coverage gaps",
-		"Esc: back from property; clear site filter or cancel input",
+		"Esc: back from property or optional tool; clear site filter or cancel input",
 		"l from property: runtime logs; a: site readiness; b: recovery",
 		"x: dependency impact; / then enter a resource, e.g. caddy",
 		"w on Incidents: export the newest listed incident capsule",

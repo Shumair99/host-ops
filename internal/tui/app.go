@@ -258,6 +258,24 @@ func (m *dashboard) goPage(page string) tea.Cmd {
 	return m.reload()
 }
 
+func (m *dashboard) backToTools() {
+	m.toolSelected = toolIndex(m.page)
+	if m.cancelRead != nil {
+		m.cancelRead()
+		m.cancelRead = nil
+	}
+	m.generation++
+	m.page = "tools"
+	m.navSelected = menuIndex("tools")
+	m.menuFocus = false
+	m.loading, m.reading = false, false
+	m.lines = nil
+	m.snapshot.Detail = nil
+	m.offset = 0
+	m.notice = ""
+	m.siteID = ""
+}
+
 func menuIndex(page string) int {
 	for i, item := range menu {
 		if item.Page == page {
@@ -471,6 +489,10 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "q":
 			return m, tea.Quit
 		case "esc":
+			if toolIndex(m.page) >= 0 && m.siteID == "" {
+				m.backToTools()
+				return m, nil
+			}
 			if !m.menuFocus && (m.siteID != "" || m.page == "site" || m.page == "logs") {
 				return m, m.goPage("sites")
 			}

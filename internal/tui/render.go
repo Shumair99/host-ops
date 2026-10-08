@@ -225,6 +225,9 @@ func (m dashboard) keyBar() string {
 	case "tools":
 		return "↑↓ tool   Enter open   ← views"
 	default:
+		if toolIndex(m.page) >= 0 && m.siteID == "" {
+			return "↑↓ scroll   Space refresh   Esc tools   ← views"
+		}
 		return "↑↓ scroll   Space refresh   ← views"
 	}
 }

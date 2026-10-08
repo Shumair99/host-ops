@@ -36,6 +36,15 @@ func toolsLines(c config.Config, selected int) []string {
 	return lines
 }
 
+func toolIndex(page string) int {
+	for i, item := range toolMenu {
+		if item.Page == page {
+			return i
+		}
+	}
+	return -1
+}
+
 func inspectionPreview(page string, snapshot Snapshot) []string {
 	lines := []string{"No inspection recorded"}
 	if page == "disk" {

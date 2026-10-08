@@ -40,6 +40,14 @@ func cpu(data []byte) (total, idle float64) {
 }
 
 func Host(ctx context.Context, runner platform.Runner, h config.Host) Sample {
+	return hostSample(ctx, runner, h, true)
+}
+
+func HostFast(ctx context.Context, runner platform.Runner, h config.Host) Sample {
+	return hostSample(ctx, runner, h, false)
+}
+
+func hostSample(ctx context.Context, runner platform.Runner, h config.Host, disk bool) Sample {
 	s := Sample{HostID: h.ID, ObservedAt: time.Now().UTC(), Values: map[string]float64{}, Unavailable: []string{}}
 	get := func(name, path string) []byte {
 		data, err := runner.Run(ctx, "cat", path)
@@ -85,6 +93,20 @@ func Host(ctx context.Context, runner platform.Runner, h config.Host) Sample {
 		s.Values["load_5"], _ = strconv.ParseFloat(fields[1], 64)
 		s.Values["load_15"], _ = strconv.ParseFloat(fields[2], 64)
 	}
+	if !disk {
+		return s
+	}
+	for key, value := range RootDisk(ctx, runner) {
+		s.Values[key] = value
+	}
+	if _, ok := s.Values["disk_percent"]; !ok {
+		s.Unavailable = append(s.Unavailable, "disk")
+	}
+	return s
+}
+
+func RootDisk(ctx context.Context, runner platform.Runner) map[string]float64 {
+	s := Sample{Values: map[string]float64{}}
 	data, err := runner.Run(ctx, "df", "-Pk", "/")
 	if err != nil {
 		s.Unavailable = append(s.Unavailable, "disk")
@@ -107,7 +129,7 @@ func Host(ctx context.Context, runner platform.Runner, h config.Host) Sample {
 			}
 		}
 	}
-	return s
+	return s.Values
 }
 
 func Bytes(raw string) (float64, error) {

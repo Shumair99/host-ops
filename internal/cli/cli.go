@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Shumair99/host-ops/internal/collector"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/console"
 	"github.com/Shumair99/host-ops/internal/evidence"
@@ -79,6 +80,13 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 		args = []string{"dashboard"}
 	}
 	command := args[0]
+	if command == "collect" {
+		if err := collector.Serve(ctx, input, out); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		return 0
+	}
 	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" && command != "security" && command != "orphans" && command != "ownership" && command != "costs" && command != "capacity" && command != "recovery" && command != "impact" && command != "preflight" && command != "capsule" && command != "record" && command != "dashboard" {
 		fmt.Fprintf(errOut, "unknown command %q\n", command)
 		return 1

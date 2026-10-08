@@ -20,6 +20,9 @@ import (
 )
 
 func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
+	if c.Discovering() {
+		return CollectOnce(ctx, c, store)
+	}
 	reports := make([]model.Report, len(c.Sites))
 	previous, err := store.Latest(ctx, c.Host.ID)
 	if err != nil {
@@ -90,6 +93,9 @@ func Cycle(ctx context.Context, c config.Config, store *storage.Store) error {
 func Run(ctx context.Context, c config.Config, store *storage.Store, interval time.Duration) error {
 	if interval < 5*time.Second {
 		return fmt.Errorf("collection interval must be at least 5s")
+	}
+	if c.Discovering() {
+		return RunLive(ctx, c, store, interval, nil)
 	}
 	for {
 		if ctx.Err() != nil {

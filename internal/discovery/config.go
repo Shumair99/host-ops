@@ -72,8 +72,10 @@ func ConfigSites(registry Registry, base config.Config) config.Config {
 		}
 		out = append(out, s)
 	}
-	for _, s := range manual {
-		out = append(out, s)
+	if !base.Discovering() {
+		for _, s := range manual {
+			out = append(out, s)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	base.Sites = out

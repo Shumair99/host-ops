@@ -56,7 +56,15 @@ func HTTP(ctx context.Context, s config.Site, rawURL, layer string) model.Check 
 	check.StatusCode = resp.StatusCode
 	check.State = model.Pass
 	check.Summary = fmt.Sprintf("HTTP %d; %.0f ms", resp.StatusCode, check.LatencyMS)
-	if resp.StatusCode != s.Health.ExpectedStatus {
+	if s.Health.Automatic {
+		if resp.StatusCode >= 500 {
+			check.State = model.Fail
+		}
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			check.State = model.Warn
+			check.Summary += "; endpoint responds, application health is unconfirmed"
+		}
+	} else if resp.StatusCode != s.Health.ExpectedStatus {
 		check.State = model.Fail
 	}
 	return check

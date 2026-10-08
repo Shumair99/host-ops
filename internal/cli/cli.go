@@ -23,6 +23,7 @@ Usage: hostops <command> [site] [options]
 Commands:
   sites             List registered production properties
   status [site]     Inspect runtime health
+  doctor [site]     Explain cross-layer observations with evidence
 
 Options:
   --config FILE     Manifest (default: HOSTOPS_CONFIG or hostops.json)
@@ -37,7 +38,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 0
 	}
 	command := args[0]
-	if command != "sites" && command != "status" {
+	if command != "sites" && command != "status" && command != "doctor" {
 		fmt.Fprintf(errOut, "unknown command %q\n", command)
 		return 1
 	}
@@ -114,6 +115,15 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 			fmt.Fprintf(w, "%s\t%s\t%s\n", check.Layer, strings.ToUpper(string(check.State)), check.Summary)
 		}
 		w.Flush()
+		if command == "doctor" {
+			for _, d := range r.Diagnoses {
+				fmt.Fprintf(out, "\nDiagnosis: %s\nConfidence: %s | Layer: %s\n", d.Finding, d.Confidence, d.Layer)
+				for _, ev := range d.Evidence {
+					fmt.Fprintf(out, "  %s\n", ev)
+				}
+				fmt.Fprintln(out, d.Investigation)
+			}
+		}
 	}
 	return code
 }

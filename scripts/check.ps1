@@ -13,7 +13,17 @@ try {
     if ($LASTEXITCODE) { throw 'Go vet failed.' }
     New-Item -ItemType Directory -Force -Path bin | Out-Null
     foreach ($program in @('hostops', 'hostops-agent', 'hostops-watcher')) {
-        & $goExe build -trimpath -o "bin/$program.exe" "./cmd/$program"
+        & $goExe build -buildvcs=false -trimpath -o "bin/$program.exe" "./cmd/$program"
         if ($LASTEXITCODE) { throw "Build failed: $program" }
     }
+    $previousOS = $env:GOOS
+    $previousArch = $env:GOARCH
+    try {
+        $env:GOOS = 'linux'
+        foreach ($architecture in @('amd64', 'arm64')) {
+            $env:GOARCH = $architecture
+            & $goExe build -buildvcs=false -trimpath -o "bin/collectors/linux-$architecture/hostops" './cmd/hostops'
+            if ($LASTEXITCODE) { throw "Collector build failed: $architecture" }
+        }
+    } finally { $env:GOOS = $previousOS; $env:GOARCH = $previousArch }
 } finally { Pop-Location }

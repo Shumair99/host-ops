@@ -74,7 +74,7 @@ type dashboard struct {
 
 func Run(parent context.Context, c config.Config, dbPath string, opts Options, input io.Reader, out io.Writer) error {
 	if opts.Interval == 0 {
-		opts.Interval = 60 * time.Second
+		opts.Interval = 30 * time.Second
 	}
 	if opts.Interval < 5*time.Second {
 		return fmt.Errorf("interval must be at least 5 seconds")
@@ -111,7 +111,18 @@ func Run(parent context.Context, c config.Config, dbPath string, opts Options, i
 			return err
 		}
 	}
-	m := newDashboard(ctx, Source{Config: c, Store: store, Demo: opts.Demo, MaxAge: max(3*time.Minute, 3*opts.Interval)}, opts)
+	source := Source{Config: c, Store: store, Demo: opts.Demo, MaxAge: max(3*time.Minute, 3*opts.Interval)}
+	if !opts.Demo && !opts.NoCollect && !opts.Once && c.Discovering() {
+		source.Live = true
+		source.Refresh = make(chan struct{}, 1)
+		done := make(chan struct{})
+		go func() { defer close(done); _ = agent.RunLive(ctx, c, store, opts.Interval, source.Refresh) }()
+		defer func() { cancel(); <-done }()
+	}
+	m := newDashboard(ctx, source, opts)
+	if source.Live {
+		m.collecting = false
+	}
 	if opts.Once {
 		if !opts.NoCollect && !opts.Demo {
 			if err = agent.Cycle(ctx, c, store); err != nil {
@@ -154,8 +165,8 @@ func newDashboard(ctx context.Context, source Source, opts Options) dashboard {
 	return dashboard{ctx: ctx, source: source, jobs: &jobs{}, interval: opts.Interval, width: width, height: height, page: page, target: "caddy", noCollect: opts.NoCollect, loading: true, collecting: !opts.NoCollect && !opts.Demo && !opts.Once}
 }
 func (m dashboard) Init() tea.Cmd {
-	commands := []tea.Cmd{m.readCmd(m.generation), tea.Tick(5*time.Second, func(time.Time) tea.Msg { return tickMsg{} })}
-	if !m.noCollect && !m.source.Demo {
+	commands := []tea.Cmd{m.readCmd(m.generation), tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })}
+	if !m.noCollect && !m.source.Demo && !m.source.Live {
 		commands = append(commands, m.cycleCmd())
 	}
 	return tea.Batch(commands...)
@@ -244,8 +255,8 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.cycleCmd()
 		}
 	case tickMsg:
-		tick := tea.Tick(5*time.Second, func(time.Time) tea.Msg { return tickMsg{} })
-		if !m.loading && (m.page == "overview" || m.page == "sites" || m.page == "issues" || m.page == "host") {
+		tick := tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })
+		if !m.loading && (m.page == "overview" || m.page == "sites" || m.page == "issues" || m.page == "host" || m.page == "inventory" || m.page == "site") {
 			return m, tea.Batch(tick, m.reload())
 		}
 		return m, tick
@@ -358,7 +369,13 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = ""
 			return m, m.reload()
 		case "f5":
-			if m.source.Demo {
+			if m.source.Live {
+				select {
+				case m.source.Refresh <- struct{}{}:
+				default:
+				}
+				m.notice = "Requested discovery and public checks on the existing session."
+			} else if m.source.Demo {
 				m.notice = "DEMO: use t to simulate an outage or recovery."
 			} else if m.noCollect {
 				m.notice = "Automatic collection is off; Space reloads this view."

@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Shumair99/host-ops/internal/agent"
 	"github.com/Shumair99/host-ops/internal/collector"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/console"
@@ -28,8 +29,10 @@ const Help = `Amadeus HostOps - terminal-only production website operations
 Usage: hostops <command> [site] [options]
 
 Commands:
+  connect TARGET    Save an SSH connection and discover sites automatically
+  discover          Refresh and explain the automatic inventory
   dashboard         Open the interactive ASCII operations desk (default)
-  sites             List registered production properties
+  sites             Refresh and list automatically discovered sites
   record <kind>     Import deployment/backup/restore/observations (--file FILE)
   status [site]     Inspect runtime health
   doctor [site]     Explain cross-layer observations with evidence
@@ -62,7 +65,7 @@ Options:
   --demo            Offline fictional dashboard; no network access
   --once            Print one dashboard frame and exit
   --no-collect      Disable automatic cycles; inspection views still read live
-  --interval VALUE  Dashboard collection interval (default 60s)
+  --interval VALUE  Public HTTP interval (default 30s; CPU/RAM stream every 1s)
   --page VIEW       Initial dashboard view, e.g. disk or readiness
 
 Exit codes: 0 healthy/list, 1 usage/configuration error, 2 unhealthy or unknown.
@@ -80,6 +83,12 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 		args = []string{"dashboard"}
 	}
 	command := args[0]
+	if command == "connect" {
+		return connect(ctx, args[1:], out, errOut)
+	}
+	if command == "discover" {
+		return discover(ctx, args[1:], out, errOut)
+	}
 	if command == "collect" {
 		if err := collector.Serve(ctx, input, out); err != nil {
 			fmt.Fprintln(errOut, err)
@@ -110,7 +119,7 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	demo := flags.Bool("demo", false, "offline demo")
 	once := flags.Bool("once", false, "one dashboard frame")
 	noCollect := flags.Bool("no-collect", false, "history only")
-	interval := flags.Duration("interval", 60*time.Second, "dashboard collection interval")
+	interval := flags.Duration("interval", 30*time.Second, "public HTTP check interval")
 	page := flags.String("page", "overview", "initial dashboard view")
 	id := ""
 	flagArgs := append([]string(nil), args[1:]...)
@@ -153,6 +162,30 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return 1
+	}
+	var observed []model.Report
+	if c.Discovering() {
+		store, openErr := storage.Open(*db)
+		if openErr != nil {
+			fmt.Fprintln(errOut, openErr)
+			return 1
+		}
+		if !*noCollect && (command == "sites" || command == "status" || command == "doctor") {
+			if err = agent.CollectOnce(ctx, c, store); err != nil {
+				store.Close()
+				fmt.Fprintln(errOut, err)
+				return 1
+			}
+		}
+		c, err = agent.ResolveConfig(ctx, c, store)
+		if err == nil {
+			observed, err = store.Latest(ctx, c.Host.ID)
+		}
+		store.Close()
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
 	}
 	selectionID := id
 	if command == "ownership" || command == "impact" || command == "preflight" || command == "capsule" || command == "record" {
@@ -226,7 +259,18 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	reports := make([]model.Report, 0, len(sites))
 	code := 0
 	for _, s := range sites {
-		r := health.Collect(ctx, c, s, platform.Command{Host: c.Host})
+		var r model.Report
+		if c.Discovering() {
+			r = model.Report{HostID: s.HostID, SiteID: s.ID, Name: s.Name, Overall: "unknown"}
+			for _, item := range observed {
+				if item.SiteID == s.ID {
+					r = item
+					break
+				}
+			}
+		} else {
+			r = health.Collect(ctx, c, s, platform.Command{Host: c.Host})
+		}
 		reports = append(reports, r)
 		if r.Overall != "healthy" {
 			code = 2

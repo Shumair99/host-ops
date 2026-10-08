@@ -58,7 +58,7 @@ func ConfigSites(registry Registry, base config.Config) config.Config {
 			for _, route := range item.Routes {
 				for _, network := range route.Networks {
 					if _, ok := w.Networks[network]; ok {
-						s.Runtime.Network = network
+						s.Runtime.Network = strings.TrimPrefix(strings.TrimPrefix(network, "docker:"), "podman:")
 					}
 				}
 			}

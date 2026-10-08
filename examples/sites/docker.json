@@ -1,4 +1,5 @@
 {
+  "discovery": { "disabled": true },
   "host": { "id": "demo-host", "name": "Demo VPS", "caddy_container": "demo-caddy" },
   "sites": [{
     "id": "client-a", "host_id": "demo-host", "name": "Client A",

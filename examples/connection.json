@@ -1,0 +1,7 @@
+{
+  "host": {
+    "id": "my-vps",
+    "name": "My VPS",
+    "ssh": "deploy@my-vps"
+  }
+}

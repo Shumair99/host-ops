@@ -15,7 +15,7 @@ var menu = []menuItem{{"o", "overview", "Overview"}, {"s", "sites", "Sites"}, {"
 
 func (m dashboard) filteredSites() []config.Site {
 	out := []config.Site{}
-	for _, s := range m.source.Config.Sites {
+	for _, s := range m.sites() {
 		if strings.Contains(strings.ToLower(s.ID+" "+s.Name+" "+s.Proxy.Domain), strings.ToLower(m.filter)) {
 			out = append(out, s)
 		}
@@ -74,6 +74,12 @@ func (m dashboard) liveLines() []string {
 	}
 	if m.page == "overview" {
 		add("HOST " + m.source.Config.Host.ID + "  |  " + m.source.Config.Host.Name)
+		if m.source.Live && !m.snapshot.Connection.Connected {
+			add("Collector: connecting or unavailable")
+			if m.snapshot.Connection.Issue != "" {
+				add(m.snapshot.Connection.Issue)
+			}
+		}
 		add(console.Bar(m.snapshot.Host.Values, "cpu_percent", "CPU"))
 		add(console.Bar(m.snapshot.Host.Values, "memory_percent", "RAM"))
 		add(console.Bar(m.snapshot.Host.Values, "disk_percent", "DISK"))
@@ -85,7 +91,7 @@ func (m dashboard) liveLines() []string {
 		add("PRODUCTION PROPERTIES")
 		nameWidth, compact := m.fleetLayout(false)
 		add(fmt.Sprintf("%-*s %-9s %s", nameWidth, "PROPERTY", "HEALTH", layerHeading(compact)))
-		for _, s := range m.source.Config.Sites {
+		for _, s := range m.sites() {
 			r := m.report(s.ID)
 			add(fmt.Sprintf("%-*s %-9s %s", nameWidth, clip(console.Safe(s.Name), nameWidth), strings.ToUpper(r.Overall), fleetChain(r, compact)))
 		}
@@ -203,6 +209,9 @@ func (m dashboard) frame() string {
 		mode = "AUTO COLLECTION OFF / MANUAL READS"
 	}
 	state := "IDLE"
+	if m.source.Live {
+		state = "STREAMING"
+	}
 	if m.collecting {
 		state = "COLLECTING"
 	}
@@ -257,3 +266,5 @@ func (m dashboard) frame() string {
 	rows = append(rows, line(notice), line("F5 collect | Enter inspect site | ? help | q quit"), border)
 	return strings.Join(rows, "\n")
 }
+
+func init() { menu = append(menu, menuItem{"z", "inventory", "Inventory"}) }

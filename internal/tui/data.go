@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Shumair99/host-ops/internal/agent"
 	"github.com/Shumair99/host-ops/internal/capacity"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/console"
 	"github.com/Shumair99/host-ops/internal/costs"
+	"github.com/Shumair99/host-ops/internal/discovery"
 	"github.com/Shumair99/host-ops/internal/incidents"
 	"github.com/Shumair99/host-ops/internal/logs"
 	"github.com/Shumair99/host-ops/internal/metrics"
@@ -23,19 +25,33 @@ import (
 )
 
 type Snapshot struct {
-	Reports  []model.Report
-	Host     metrics.Sample
-	Events   []storage.Record
-	LoadedAt time.Time
+	Sites      []config.Site
+	Inventory  discovery.Registry
+	Connection agent.Connection
+	Reports    []model.Report
+	Host       metrics.Sample
+	Events     []storage.Record
+	LoadedAt   time.Time
 }
 type Source struct {
-	Config config.Config
-	Store  *storage.Store
-	Demo   bool
-	MaxAge time.Duration
+	Live    bool
+	Refresh chan struct{}
+	Config  config.Config
+	Store   *storage.Store
+	Demo    bool
+	MaxAge  time.Duration
 }
 
 func (s Source) Base(ctx context.Context) (Snapshot, error) {
+	var inventory discovery.Registry
+	if !s.Demo && s.Config.Discovering() {
+		var err error
+		inventory, err = s.Store.Inventory(ctx, s.Config.Host.ID)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		s.Config = discovery.ConfigSites(inventory, s.Config)
+	}
 	reports, err := s.Store.Latest(ctx, s.Config.Host.ID)
 	if err != nil {
 		return Snapshot{}, err
@@ -58,7 +74,14 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 			}
 		}
 	}
-	snapshot := Snapshot{LoadedAt: time.Now().UTC(), Reports: []model.Report{}, Host: metrics.Sample{HostID: s.Config.Host.ID, Values: map[string]float64{}, Unavailable: []string{}}}
+	snapshot := Snapshot{Sites: s.Config.Sites, Inventory: inventory, LoadedAt: time.Now().UTC(), Reports: []model.Report{}, Host: metrics.Sample{HostID: s.Config.Host.ID, Values: map[string]float64{}, Unavailable: []string{}}}
+	if data, err := s.Store.State(ctx, s.Config.Host.ID, "", "connection"); err != nil {
+		return Snapshot{}, err
+	} else if len(data) > 0 {
+		if err = json.Unmarshal(data, &snapshot.Connection); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	age := s.MaxAge
 	if age == 0 {
 		age = 3 * time.Minute
@@ -92,11 +115,27 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 			snapshot.Host.Unavailable = append(snapshot.Host.Unavailable, "host observations are stale")
 		}
 	}
+	if !s.Demo && s.Config.Discovering() {
+		if data, err := s.Store.State(ctx, s.Config.Host.ID, "", "host_metrics"); err != nil {
+			return Snapshot{}, err
+		} else if len(data) > 0 {
+			if err = json.Unmarshal(data, &snapshot.Host); err != nil {
+				return Snapshot{}, err
+			}
+		}
+		if time.Since(snapshot.Host.ObservedAt) > 5*time.Second {
+			snapshot.Host.Values = map[string]float64{}
+			snapshot.Host.Unavailable = append(snapshot.Host.Unavailable, "Telemetry is stale; collector connection may be unavailable")
+		}
+	}
 	snapshot.Events, err = s.Store.Query(ctx, s.Config.Host.ID, "", "event", time.Now().Add(-24*time.Hour), 12)
 	return snapshot, err
 }
 
 func (s Source) Page(ctx context.Context, page, siteID, target string, snapshot Snapshot) ([]string, error) {
+	if snapshot.Sites != nil {
+		s.Config.Sites = snapshot.Sites
+	}
 	runner := platform.Command{Host: s.Config.Host}
 	sites, err := s.Config.Select(siteID)
 	if err != nil {
@@ -107,9 +146,14 @@ func (s Source) Page(ctx context.Context, page, siteID, target string, snapshot 
 		byID[r.SiteID] = r
 	}
 	switch page {
+	case "inventory":
+		return inventoryLines(snapshot.Inventory), nil
 	case "overview", "sites", "issues":
 		return nil, nil
 	case "site":
+		if len(sites) == 0 {
+			return []string{"Site is no longer in the active inventory."}, nil
+		}
 		return property(sites[0], byID[siteID]), nil
 	case "logs":
 		if s.Demo {

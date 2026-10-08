@@ -87,7 +87,9 @@ func Evaluate(host string, samples []metrics.Sample, now time.Time) Report {
 	return r
 }
 func Assess(ctx context.Context, c config.Config, store *storage.Store) (Report, error) {
-	records, err := store.Query(ctx, c.Host.ID, "", "host_metrics", time.Now().Add(-30*24*time.Hour), 1000)
+	now := time.Now()
+	since := now.Add(-30 * 24 * time.Hour)
+	records, err := store.Query(ctx, c.Host.ID, "", "host_metrics", since, 1000)
 	if err != nil {
 		return Report{}, err
 	}
@@ -98,5 +100,18 @@ func Assess(ctx context.Context, c config.Config, store *storage.Store) (Report,
 			samples = append(samples, s)
 		}
 	}
-	return Evaluate(c.Host.ID, samples, time.Now()), nil
+	r := Evaluate(c.Host.ID, samples, now)
+	r.Notes = append(r.Notes, "CPU/RAM percentiles use the latest 1,000 samples. Disk growth compares the first and latest observations within 30 days.")
+	first, err := store.Oldest(ctx, c.Host.ID, "", "host_metrics", since)
+	if err != nil {
+		return Report{}, err
+	}
+	if first != nil && len(samples) > 0 {
+		var earliest metrics.Sample
+		if json.Unmarshal(first.Data, &earliest) == nil {
+			growth := Evaluate(c.Host.ID, []metrics.Sample{earliest, samples[len(samples)-1]}, now)
+			r.DiskGrowthBytesPerDay, r.DaysTo85 = growth.DiskGrowthBytesPerDay, growth.DaysTo85
+		}
+	}
+	return r, nil
 }

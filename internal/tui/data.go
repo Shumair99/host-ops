@@ -166,6 +166,8 @@ func (s Source) Page(ctx context.Context, page, siteID, target string, snapshot 
 		return lines, nil
 	case "overview", "sites", "issues":
 		return nil, nil
+	case "tools":
+		return nil, nil
 	case "site":
 		if len(sites) == 0 {
 			return []string{"Site is no longer in the active inventory."}, nil
@@ -243,7 +245,19 @@ func (s Source) Page(ctx context.Context, page, siteID, target string, snapshot 
 			return nil, fmt.Errorf("unknown dashboard view")
 		}
 		records, err := s.Store.Query(ctx, s.Config.Host.ID, siteID, kind, time.Now().Add(-24*time.Hour), 100)
-		return console.Format(page, records), err
+		if err != nil {
+			return nil, err
+		}
+		if page == "events" {
+			for _, extra := range []string{"change", "deployment"} {
+				more, err := s.Store.Query(ctx, s.Config.Host.ID, siteID, extra, time.Now().Add(-24*time.Hour), 100)
+				if err != nil {
+					return nil, err
+				}
+				records = append(records, more...)
+			}
+		}
+		return timelineLines(page, records), nil
 	}
 }
 
@@ -298,10 +312,13 @@ func chain(r model.Report) string {
 func HelpLines() []string {
 	return []string{
 		"AMADEUS HOSTOPS - TERMINAL OPERATIONS DESK", "",
-		"Menu: Up/Down or j/k selects a view; Right or Enter opens it",
+		"Menu: Up/Down or j/k previews a view; Right or Enter focuses content",
 		"Content: Up/Down scrolls; on Sites, selects a property",
 		"Left returns focus to the menu; Tab switches between panes",
 		"Menu letters jump directly to a view, e.g. o, s, i, z",
+		"a: optional Tools (costs, capacity, exposure and evidence assessments)",
+		"Timeline combines transitions, infrastructure changes and deployments.",
+		"Disk/security/preflight inspections start when entering content, not browsing.",
 		"PageUp/PageDown, Home/End: move within the focused pane",
 		"Enter on Sites: open property health, doctor and passport",
 		"/ on Sites: filter by name, ID or domain; Esc clears the filter",

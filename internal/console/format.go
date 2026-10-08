@@ -138,6 +138,9 @@ func Format(kind string, value any) []string {
 		add("%s", Bar(v.Values, "disk_percent", "DISK"))
 		keys := []string{}
 		for k := range v.Values {
+			if k == "disk_observed_unix_seconds" || k == "cpu_percent" || k == "memory_percent" || k == "disk_percent" {
+				continue
+			}
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
@@ -205,13 +208,49 @@ func Format(kind string, value any) []string {
 			add("")
 		}
 	case costs.Report:
+		if v.TotalCost == nil {
+			add("OPTIONAL BILLING / COST SETUP")
+			add("No usable monthly budget is connected. No allocation is assumed.")
+			add("API providers: hostops billing list --provider hetzner (or hostinger)")
+			add("Connect one resource: hostops billing set --provider NAME --resource ID")
+			add("Manual budget: hostops billing set --provider manual --monthly AMOUNT --currency GBP")
+			add("Own hardware: hostops billing set --provider self-hosted (budget optional)")
+			for _, note := range v.Notes {
+				add("%s", note)
+			}
+			break
+		}
 		add("MONTHLY HOST COST: %s", Money(v.TotalCost, v.Currency))
-		add("%-20s %-15s %-15s %s", "SITE", "ALLOCATED COST", "HOSTING FEE", "MARGIN")
+		if v.Billing != nil {
+			add("Source: %s / %s | %s", v.Billing.Provider, v.Billing.Source, At(v.Billing.ObservedAt))
+			if v.Billing.Plan != "" {
+				add("Plan: %s", v.Billing.Plan)
+			}
+			if v.Billing.ServerMonthToDate != nil {
+				add("Server-only month-to-date estimate: %s", Money(v.Billing.ServerMonthToDate, v.Currency))
+			}
+		}
+		fees := false
+		for _, site := range v.Sites {
+			fees = fees || site.Revenue != nil
+		}
+		if fees {
+			add("%-20s %-15s %-15s %s", "SITE", "ALLOCATED COST", "HOSTING FEE", "MARGIN")
+		} else {
+			add("%-20s %s", "SITE", "ESTIMATED ALLOCATION")
+		}
 		for _, s := range v.Sites {
-			add("%-20s %-15s %-15s %s", s.Name, Money(s.Cost, v.Currency), Money(s.Revenue, v.Currency), Money(s.Margin, v.Currency))
+			if fees {
+				add("%-20s %-15s %-15s %s", s.Name, Money(s.Cost, v.Currency), Money(s.Revenue, v.Currency), Money(s.Margin, v.Currency))
+			} else {
+				add("%-20s %s", s.Name, Money(s.Cost, v.Currency))
+			}
 			if s.NoisyNeighbour {
 				add("  Review disproportionate memory consumption.")
 			}
+		}
+		if !fees {
+			add("Hosting fees/margins are hidden until you configure client fees.")
 		}
 		add("")
 		add("%s", v.Formula)

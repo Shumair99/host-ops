@@ -50,6 +50,7 @@ Commands:
   orphans           Review possible stopped/unregistered resource candidates
   ownership <name>  Find the site owning a container, domain or configured port
   costs             Explain configured cost allocation and estimated margins
+  billing           Optional provider API / manual budget setup (billing help)
   capacity          Assess measured resource usage and history limits
   recovery [site]   Assess backup and reported restore evidence
   preflight <target> Read-only reboot or site maintenance assessment
@@ -88,6 +89,9 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	}
 	if command == "discover" {
 		return discover(ctx, args[1:], out, errOut)
+	}
+	if command == "billing" {
+		return billingCommand(ctx, args[1:], out, errOut)
 	}
 	if command == "collect" {
 		if err := collector.Serve(ctx, input, out); err != nil {

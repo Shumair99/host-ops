@@ -28,6 +28,7 @@ type Discovery struct {
 func (c Config) Discovering() bool { return !c.Discovery.Disabled }
 
 type Host struct {
+	Billing           *Billing    `json:"billing,omitempty"`
 	SSHPort           int         `json:"ssh_port,omitempty"`
 	ID                string      `json:"id"`
 	Name              string      `json:"name"`
@@ -40,6 +41,22 @@ type Host struct {
 	CostWeights       CostWeights `json:"cost_weights,omitempty"`
 	Currency          string      `json:"currency,omitempty"`
 	DiskRoots         []string    `json:"disk_roots,omitempty"`
+}
+
+// Billing selects one explicit source. Secrets remain in the named environment
+// variable; the manifest contains only the provider and resource identity.
+type Billing struct {
+	Provider      string   `json:"provider"`
+	ResourceID    string   `json:"resource_id,omitempty"`
+	TokenEnv      string   `json:"token_env,omitempty"`
+	MonthlyAmount *float64 `json:"monthly_amount,omitempty"`
+}
+
+func (h Host) BillingEnabled() bool {
+	if h.Billing == nil {
+		return h.MonthlyCost+h.MonthlyBackupCost > 0
+	}
+	return h.Billing.Provider != "self-hosted" || h.Billing.MonthlyAmount != nil
 }
 
 type CostWeights struct {
@@ -165,6 +182,37 @@ func (c *Config) Validate() error {
 	}
 	if c.Host.MonthlyCost+c.Host.MonthlyBackupCost > 0 && c.Host.Currency == "" {
 		return fmt.Errorf("configured costs require a currency")
+	}
+	if b := c.Host.Billing; b != nil {
+		switch b.Provider {
+		case "hetzner":
+			if !regexp.MustCompile(`^[1-9][0-9]*$`).MatchString(b.ResourceID) {
+				return fmt.Errorf("Hetzner billing requires a numeric server resource_id")
+			}
+		case "hostinger":
+			if !identifier.MatchString(b.ResourceID) {
+				return fmt.Errorf("Hostinger billing requires a subscription resource_id")
+			}
+		case "manual", "self-hosted":
+			if b.ResourceID != "" || b.TokenEnv != "" {
+				return fmt.Errorf("manual billing has no API resource or token")
+			}
+		default:
+			return fmt.Errorf("unsupported billing provider")
+		}
+		if b.TokenEnv != "" && !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`).MatchString(b.TokenEnv) {
+			return fmt.Errorf("billing token_env must name an environment variable")
+		}
+		if b.MonthlyAmount != nil {
+			if b.Provider == "hetzner" || b.Provider == "hostinger" {
+				return fmt.Errorf("API billing cannot also specify a manual amount")
+			}
+			if *b.MonthlyAmount < 0 || math.IsNaN(*b.MonthlyAmount) || math.IsInf(*b.MonthlyAmount, 0) || c.Host.Currency == "" {
+				return fmt.Errorf("manual monthly amount must be finite, non-negative and have a currency")
+			}
+		} else if b.Provider == "manual" {
+			return fmt.Errorf("manual billing requires monthly_amount (zero is valid)")
+		}
 	}
 	if len(c.Sites) == 0 && c.Discovery.Disabled {
 		return fmt.Errorf("manifest must register at least one site")

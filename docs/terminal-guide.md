@@ -63,14 +63,15 @@ The live root disk was measured at 88% used during verification. Open `d` to ins
 
 | Key | Action |
 | --- | --- |
-| Up / Down; `j` / `k` in menu | Select a view without opening it |
-| Right / Enter in menu | Open the selected view and focus its content |
+| Up / Down; `j` / `k` in menu | Preview the selected view immediately, keeping menu focus |
+| Right / Enter in menu | Move focus into the displayed content |
 | Left | Return focus to the Views menu |
 | Tab / Shift+Tab | Switch focus between menu and content |
 | View letter shown in menu | Jump directly to that view |
 | Up / Down; `j` / `k` in content | Scroll; on Sites, select a property |
 | PageUp / PageDown; Home / End | Move through the focused menu or evidence |
 | Enter in Sites content | Inspect selected property |
+| `a` outside a site inspector | Open optional Tools; Up/Down selects and Enter opens a tool |
 | `/` on Sites | Filter by name, ID or domain |
 | `/` on Impact | Change resource being assessed |
 | Space | Reload the current view |
@@ -83,7 +84,9 @@ The live root disk was measured at 88% used during verification. Open `d` to ins
 | `?` | Help |
 | `q` / Ctrl+C | Quit and restore terminal |
 
-Views: `o` Overview, `s` Sites, `i` Issues, `h` Host metrics, `z` Inventory, `d` Disk, `r` Readiness, `e` Events, `g` Changes, `y` Deployments, `n` Incidents, `v` History, `m` External watcher checks, `u` Security, `c` Costs, `p` Capacity, `b` Recovery, `f` reboot Preflight, `x` Impact. The menu scrolls to keep its selected view visible. `>` marks the menu cursor, `*` marks the open view, and `[FOCUS]` identifies the pane receiving navigation keys. View-letter shortcuts open their content directly.
+Main views: `o` Overview, `s` Sites, `i` Issues, `h` Host metrics, `z` Inventory, `d` Disk, `e` Timeline, `n` Incidents, `v` Health log, `a` Tools, `?` Help. `>` marks the menu cursor, `*` marks the displayed view while content has focus, and `[FOCUS]` identifies the pane receiving navigation keys. Browsing switches the right pane immediately. Disk previews show current root capacity or the previous inspection; entering starts its first scan and Space requests another. This prevents repeated directory scans while browsing.
+
+Tools contains Security (`u`), Capacity (`p`), Impact (`x`), Readiness (`r`), Recovery (`b`), Preflight (`f`), Changes (`g`), Deployments (`y`), External watcher (`m`), and Costs/setup (`c`). Their letters remain direct shortcuts. Logs, site readiness and recovery are also available inside each site inspector. Cold Security/Preflight inspections run only when explicitly opened, and retained results stay visible on subsequent visits. Costs show setup instructions until there is billing evidence, and omit fee/margin columns until client fees are configured. See [billing setup](economics.md).
 
 ## Optional background collector and plain commands
 

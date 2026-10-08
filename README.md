@@ -1,6 +1,6 @@
 # Amadeus HostOps
 
-A terminal operations desk that discovers websites on a Linux VPS. Connect with SSH, and HostOps combines runtime, proxy, service and socket observations into one inventory. The ASCII dashboard runs in PowerShell, CMD or a Linux terminal, with local SQLite history.
+A terminal operations desk that discovers websites on a Linux server. Connect with SSH, and HostOps combines runtime, proxy, service and socket observations into one inventory. The ASCII dashboard runs in PowerShell, CMD or a Linux terminal, with local SQLite history.
 
 CPU and RAM refresh every second through direct Linux kernel-file reads. Container metrics, inventory and root disk refresh every 30 seconds. Sites come from observed proxy domains; you do not need to register them in JSON. Overview and Sites combine observed base/`www` domain pairs into one row; the inspector retains each domain's independent checks. Discovery coverage and unavailable sources are visible alongside the sites.
 
@@ -34,7 +34,9 @@ Build or obtain the full bundle, including `collectors/linux-amd64/hostops` and 
 
 Running `hostops` without a command also opens the dashboard. One persistent SSH collector supplies live metrics and inventory while public checks run independently from your computer. The public HTTP interval defaults to 30 seconds; DNS/TLS checks run every five minutes. `scripts/dev.ps1` opens the live dashboard, and `scripts/dev.ps1 -Demo` opens the offline demo.
 
-Use a terminal at least 60 columns by 16 rows; 100 by 30 or larger shows more evidence. Up/Down selects a menu view; Right or Enter opens it. Left returns to the menu, and Tab switches focus between the two panes. In the content pane, Up/Down scrolls or selects a site, and Enter opens its inspector. Press `s` for sites, `z` for inventory/source coverage, `d` for disk investigation, F5 for fresh inventory/public checks, and `?` for help. Background refreshes preserve the displayed evidence. Missing and stale observations stay explicit.
+Use a terminal at least 60 columns by 16 rows; 100 by 30 or larger shows more evidence. Up/Down in the menu previews each view immediately; Right or Enter moves focus into its content. Left returns to the menu, and Tab switches pane focus. In content, Up/Down scrolls or selects a site, and Enter opens its inspector. The main menu prioritizes monitoring; `a` opens optional Tools. Timeline combines health transitions, changes and deployments, while Health history summarizes observations. Background refreshes preserve displayed evidence. Browsing past Disk shows capacity and retained results; entering the view starts its first directory inspection.
+
+Costs are optional. `hostops billing` connects a Hetzner server or Hostinger subscription through API reads, or stores an explicit manual budget. Tokens stay in environment variables; estimates show their source and exclude expenses the reader cannot establish. Self-hosted machines can leave cost tracking disabled. See [billing setup](docs/economics.md).
 
 Read the [terminal guide and walkthrough](docs/terminal-guide.md) for the full demo, live use and keyboard map. One-shot commands also produce readable text; add `--json` for scripts:
 

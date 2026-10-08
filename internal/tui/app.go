@@ -64,7 +64,9 @@ type dashboard struct {
 	page, siteID, target, filter            string
 	selected, offset, generation            int
 	navSelected                             int
+	toolSelected                            int
 	menuFocus                               bool
+	viewCache                               map[string][]string
 	snapshot                                Snapshot
 	lines                                   []string
 	loading, reading, collecting, noCollect bool
@@ -83,7 +85,7 @@ func Run(parent context.Context, c config.Config, dbPath string, opts Options, i
 	}
 	if opts.Page != "" {
 		valid := false
-		for _, item := range menu {
+		for _, item := range allViews() {
 			valid = valid || item.Page == opts.Page
 		}
 		if !valid {
@@ -164,7 +166,7 @@ func newDashboard(ctx context.Context, source Source, opts Options) dashboard {
 	if page == "" {
 		page = "overview"
 	}
-	m := dashboard{ctx: ctx, source: source, jobs: &jobs{}, interval: opts.Interval, width: width, height: height, page: page, target: "caddy", noCollect: opts.NoCollect, loading: true, menuFocus: true, collecting: !opts.NoCollect && !opts.Demo && !opts.Once}
+	m := dashboard{ctx: ctx, source: source, jobs: &jobs{}, interval: opts.Interval, width: width, height: height, page: page, target: "host", noCollect: opts.NoCollect, loading: true, menuFocus: true, viewCache: map[string][]string{}, collecting: !opts.NoCollect && !opts.Demo && !opts.Once}
 	m.navSelected = menuIndex(page)
 	return m
 }
@@ -224,7 +226,56 @@ func menuIndex(page string) int {
 			return i
 		}
 	}
-	return 1 // Property inspectors belong to Sites.
+	if page == "site" || page == "logs" {
+		return 1
+	}
+	for i, item := range menu {
+		if item.Page == "tools" {
+			return i
+		}
+	}
+	return 0
+}
+
+func demandPage(page string) bool {
+	return page == "disk" || page == "security" || page == "preflight"
+}
+
+func (m *dashboard) previewMenu(index int) tea.Cmd {
+	page := menu[index].Page
+	if page == m.page && m.siteID == "" {
+		m.navSelected = index
+		return nil
+	}
+	if demandPage(page) && !m.source.Demo {
+		if m.cancelRead != nil {
+			m.cancelRead()
+		}
+		m.generation++
+		m.page, m.siteID, m.offset = page, "", 0
+		m.navSelected, m.menuFocus = index, true
+		m.loading, m.reading, m.notice = false, false, ""
+		m.lines = m.viewCache[page]
+		if len(m.lines) == 0 {
+			m.lines = inspectionPreview(page, m.snapshot)
+		}
+		return nil
+	}
+	cmd := m.goPage(page)
+	m.menuFocus = true
+	if cached := m.viewCache[page]; len(cached) > 0 {
+		m.lines, m.loading = cached, false
+	}
+	return cmd
+}
+
+func (m *dashboard) focusContent() tea.Cmd {
+	m.menuFocus = false
+	if demandPage(m.page) && !m.source.Demo && len(m.viewCache[m.page]) == 0 && !m.reading && !m.loading {
+		m.loading = true
+		return m.reload()
+	}
+	return nil
 }
 
 func (m *dashboard) inspectPage(page string) tea.Cmd {
@@ -254,6 +305,9 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.snapshot, m.lines = msg.snapshot, msg.lines
+			if m.siteID == "" {
+				m.viewCache[m.page] = append([]string(nil), msg.lines...)
+			}
 			if strings.HasPrefix(m.notice, "Refresh failed; showing previous evidence:") {
 				m.notice = ""
 			}
@@ -348,18 +402,23 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.menuFocus = true
 			m.navSelected = menuIndex(m.page)
 		case "tab", "shift+tab":
-			m.menuFocus = !m.menuFocus
+			if m.menuFocus {
+				return m, m.focusContent()
+			}
+			m.menuFocus = true
 			m.navSelected = menuIndex(m.page)
 		case "left":
 			m.menuFocus = true
 			m.navSelected = menuIndex(m.page)
 		case "right":
 			if m.menuFocus {
-				return m, m.goPage(menu[m.navSelected].Page)
+				return m, m.focusContent()
 			}
 		case "up", "k":
 			if m.menuFocus {
-				m.navSelected = max(0, m.navSelected-1)
+				return m, m.previewMenu(max(0, m.navSelected-1))
+			} else if m.page == "tools" {
+				m.toolSelected = max(0, m.toolSelected-1)
 			} else if m.page == "sites" {
 				m.selected = max(0, m.selected-1)
 			} else {
@@ -367,7 +426,9 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "down", "j":
 			if m.menuFocus {
-				m.navSelected = min(len(menu)-1, m.navSelected+1)
+				return m, m.previewMenu(min(len(menu)-1, m.navSelected+1))
+			} else if m.page == "tools" {
+				m.toolSelected = min(len(toolMenu)-1, m.toolSelected+1)
 			} else if m.page == "sites" {
 				m.selected = min(max(0, len(m.filteredSites())-1), m.selected+1)
 			} else {
@@ -375,26 +436,30 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "pgup":
 			if m.menuFocus {
-				m.navSelected = max(0, m.navSelected-max(1, m.height-10))
+				return m, m.previewMenu(max(0, m.navSelected-max(1, m.height-10)))
 			} else {
 				m.offset = max(0, m.offset-max(1, m.height-10))
 			}
 		case "pgdown":
 			if m.menuFocus {
-				m.navSelected = min(len(menu)-1, m.navSelected+max(1, m.height-10))
+				return m, m.previewMenu(min(len(menu)-1, m.navSelected+max(1, m.height-10)))
 			} else {
 				m.offset += max(1, m.height-10)
 			}
 		case "home":
 			if m.menuFocus {
-				m.navSelected = 0
+				return m, m.previewMenu(0)
+			} else if m.page == "tools" {
+				m.toolSelected = 0
 			} else {
 				m.offset = 0
 				m.selected = 0
 			}
 		case "end":
 			if m.menuFocus {
-				m.navSelected = len(menu) - 1
+				return m, m.previewMenu(len(menu) - 1)
+			} else if m.page == "tools" {
+				m.toolSelected = len(toolMenu) - 1
 			} else if m.page == "sites" {
 				m.selected = max(0, len(m.filteredSites())-1)
 			} else {
@@ -402,7 +467,10 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if m.menuFocus {
-				return m, m.goPage(menu[m.navSelected].Page)
+				return m, m.focusContent()
+			}
+			if m.page == "tools" {
+				return m, m.goPage(toolMenu[m.toolSelected].Page)
 			}
 			if m.page == "sites" {
 				sites := m.filteredSites()
@@ -449,6 +517,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.menuFocus && m.siteID != "" {
 				return m, m.inspectPage("readiness")
 			}
+			return m, m.goPage("tools")
 		case "b":
 			if !m.menuFocus && m.siteID != "" {
 				return m, m.inspectPage("recovery")
@@ -475,7 +544,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				})
 			}
 		default:
-			for _, item := range menu {
+			for _, item := range allViews() {
 				if item.Key == key {
 					return m, m.goPage(item.Page)
 				}

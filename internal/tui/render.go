@@ -14,11 +14,19 @@ type menuItem struct{ Key, Page, Label string }
 var menu = []menuItem{
 	{"o", "overview", "Overview"}, {"s", "sites", "Sites"}, {"i", "issues", "Issues"},
 	{"h", "host", "Host metrics"}, {"z", "inventory", "Inventory"}, {"d", "disk", "Disk usage"},
-	{"r", "readiness", "Readiness"}, {"e", "events", "Events"}, {"g", "changes", "Changes"},
-	{"y", "deployments", "Deployments"}, {"n", "incidents", "Incidents"}, {"v", "monitoring", "History"},
-	{"m", "external", "External"}, {"u", "security", "Security"}, {"c", "costs", "Costs"},
-	{"p", "capacity", "Capacity"}, {"b", "recovery", "Recovery"}, {"f", "preflight", "Preflight"},
-	{"x", "impact", "Impact"}, {"?", "help", "Help"},
+	{"e", "events", "Timeline"}, {"n", "incidents", "Incidents"}, {"v", "monitoring", "Health log"},
+	{"a", "tools", "Tools"}, {"?", "help", "Help"},
+}
+
+var toolMenu = []menuItem{
+	{"u", "security", "Security"}, {"p", "capacity", "Capacity"}, {"x", "impact", "Impact"},
+	{"r", "readiness", "Readiness"}, {"b", "recovery", "Recovery"}, {"f", "preflight", "Preflight"},
+	{"g", "changes", "Changes"}, {"y", "deployments", "Deployments"}, {"m", "external", "External"},
+	{"c", "costs", "Costs / setup"},
+}
+
+func allViews() []menuItem {
+	return append(append([]menuItem(nil), menu...), toolMenu...)
 }
 
 func (m dashboard) filteredSites() []config.Site {
@@ -36,6 +44,9 @@ func (m dashboard) report(id string) model.Report {
 func (m dashboard) liveLines() []string {
 	lines := []string{}
 	add := func(s string) { lines = append(lines, console.Safe(s)) }
+	if m.page == "tools" {
+		return toolsLines(m.source.Config, m.toolSelected)
+	}
 	if m.page == "sites" {
 		nameWidth, compact := m.fleetLayout(true)
 		add(fmt.Sprintf("  %-*s %-9s %s", nameWidth, "PROPERTY", "HEALTH", layerHeading(compact)))
@@ -57,23 +68,7 @@ func (m dashboard) liveLines() []string {
 		return lines
 	}
 	if m.page == "issues" {
-		disk, ok := m.snapshot.Host.Values["disk_percent"]
-		if ok && disk >= 80 {
-			add(fmt.Sprintf("[WARN] Host root disk %.1f%% used", disk))
-			add("  Open Disk usage [d] to investigate without cleanup.")
-		}
-		for _, r := range m.snapshot.Reports {
-			for _, c := range r.Checks {
-				if c.State != model.Pass && c.State != model.Skip {
-					add(fmt.Sprintf("[%s] %s / %s", strings.ToUpper(string(c.State)), r.Name, c.Layer))
-					add("  " + c.Summary)
-				}
-			}
-		}
-		if len(lines) == 0 {
-			add("No observed exceptions.")
-		}
-		return lines
+		return issueLines(m.snapshot)
 	}
 	if m.page == "overview" {
 		add("HOST " + m.source.Config.Host.ID + "  |  " + m.source.Config.Host.Name)
@@ -237,6 +232,8 @@ func (m dashboard) frame() string {
 	offset := min(m.offset, max(0, len(content)-bodyHeight))
 	if m.page == "sites" {
 		offset = min(max(0, m.selected-bodyHeight+4), max(0, len(content)-bodyHeight))
+	} else if m.page == "tools" {
+		offset = min(max(0, 2*m.toolSelected-bodyHeight+5), max(0, len(content)-bodyHeight))
 	}
 	active := m.navSelected
 	navStart := max(0, min(active-bodyHeight/2, len(menu)-bodyHeight))
@@ -248,7 +245,7 @@ func (m dashboard) frame() string {
 			cursor := " "
 			if m.menuFocus && index == m.navSelected {
 				cursor = ">"
-			} else if item.Page == m.page {
+			} else if index == menuIndex(m.page) {
 				cursor = "*"
 			}
 			left = cursor + "[" + item.Key + "] " + item.Label
@@ -268,7 +265,7 @@ func (m dashboard) frame() string {
 	}
 	if notice == "" {
 		if m.menuFocus {
-			notice = "Menu: Up/Down select | Right/Enter open | letter jumps to view"
+			notice = "Menu: Up/Down preview | Right/Enter focus content | letter shortcut"
 		} else {
 			notice = fmt.Sprintf("%d-%d of %d lines | Up/Down scroll | Left menu | Space refresh", min(offset+1, len(content)), min(offset+bodyHeight, len(content)), len(content))
 		}

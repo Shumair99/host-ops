@@ -90,3 +90,11 @@ Discovery is enabled by default. Connection-only settings such as `examples/conn
 `discovery.disabled: true` explicitly selects the previous registered workflow, used by legacy examples and the offline demo. It is never selected because a reader failed. Use one active collector per database; the headless agent uses the same pipeline as the dashboard. Use `--no-collect` when a separate agent supplies the dashboard's database.
 
 Older readiness/security/preflight features still have Docker/Caddy-specific inspections in places. A portable inventory does not certify every maintenance/recovery check on every runtime. Unknown evidence stays visible. Public probes use the client computer's network; independent outage detection requires a watcher on a separate machine.
+
+## Physical servers and Proxmox
+
+The pipeline targets Linux, not a VPS provider. An Ubuntu physical server, rented dedicated server or Linux VM can use the same SSH connection, AMD64/ARM64 collector and supported runtime/proxy readers. Commercial billing is optional. Other architectures/operating systems remain outside this bundle; unsupported proxies or permissions still limit site discovery.
+
+With Proxmox, connect to the Linux VM that hosts the websites. A Linux LXC guest may fit the readers, but its permissions and virtualized counters need verification; that environment has not been tested here. Connecting only to the hypervisor provides host-level Linux observations and supported services directly on it, not website configuration inside every guest. A Proxmox API reader, cluster overview and automatic guest traversal are not implemented. Proxmox uses Debian, KVM and LXC; see the [official feature description](https://proxmox.com/en/products/proxmox-virtual-environment/features).
+
+The dashboard selects one host manifest at a time. Separate configs/databases support separate collection sessions; there is no combined multi-host fleet view yet. Private home sites require client-side HTTP/DNS access through your LAN or VPN.

@@ -168,6 +168,26 @@ func (s *Store) Retain(ctx context.Context, age time.Duration) error {
 	return err
 }
 
+// Oldest supplies the first observation in a window without discarding it when
+// a bounded recent-sample query has more than its row limit.
+func (s *Store) Oldest(ctx context.Context, host, site, kind string, since time.Time) (*Record, error) {
+	var record Record
+	var at, data string
+	err := s.DB.QueryRowContext(ctx, `SELECT id,host_id,site_id,kind,observed_at,data FROM records WHERE host_id=? AND site_id=? AND kind=? AND observed_at>=? ORDER BY observed_at,id LIMIT 1`, host, site, kind, since.UTC().Format(timestampLayout)).Scan(&record.ID, &record.HostID, &record.SiteID, &record.Kind, &at, &data)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	record.ObservedAt, err = time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return nil, err
+	}
+	record.Data = json.RawMessage(data)
+	return &record, nil
+}
+
 // LatestEntities retains open incidents regardless of how long ago they began.
 func (s *Store) LatestEntities(ctx context.Context, host, kind string) ([]Record, error) {
 	rows, err := s.DB.QueryContext(ctx, `SELECT id,host_id,site_id,kind,observed_at,data FROM records WHERE id IN (SELECT max(id) FROM records WHERE host_id=? AND kind=? GROUP BY json_extract(data,'$.id')) ORDER BY id DESC LIMIT 1000`, host, kind)

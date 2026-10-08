@@ -72,7 +72,7 @@ func TestASCIIFrameFitsResizedTerminals(t *testing.T) {
 	m := testDashboard(t)
 	for _, size := range [][2]int{{100, 30}, {80, 24}, {60, 16}, {140, 40}} {
 		m.width, m.height = size[0], size[1]
-		for _, item := range menu {
+		for _, item := range allViews() {
 			m.page = item.Page
 			m.loading = false
 			m.lines = HelpLines()
@@ -115,15 +115,16 @@ func TestSiteSelectionDrillDownAndFilter(t *testing.T) {
 	}
 }
 
-func TestMenuSelectsVerticallyAndOpensWithRight(t *testing.T) {
+func TestMenuPreviewsVerticallyAndRightOnlyChangesFocus(t *testing.T) {
 	m := testDashboard(t)
 	if !m.menuFocus {
 		t.Fatal("dashboard did not start with menu focus")
 	}
 	m, cmd := press(m, "down")
-	if cmd != nil || m.page != "overview" || menu[m.navSelected].Page != "sites" {
-		t.Fatal("moving the menu cursor opened a view", m.page, m.navSelected)
+	if cmd == nil || m.page != "sites" || !m.menuFocus || menu[m.navSelected].Page != "sites" {
+		t.Fatal("moving the menu cursor did not preview the selected view", m.page, m.navSelected)
 	}
+	m = finish(m, cmd)
 	m, cmd = press(m, "right")
 	m = finish(m, cmd)
 	if m.page != "sites" || m.menuFocus {
@@ -135,8 +136,8 @@ func TestMenuSelectsVerticallyAndOpensWithRight(t *testing.T) {
 	}
 	m, _ = press(m, "left")
 	m, _ = press(m, "down")
-	if !m.menuFocus || m.page != "sites" || menu[m.navSelected].Page != "issues" {
-		t.Fatal("Left did not return to menu navigation")
+	if !m.menuFocus || m.page != "issues" || menu[m.navSelected].Page != "issues" {
+		t.Fatal("menu selection did not update the preview")
 	}
 	m, cmd = press(m, "enter")
 	m = finish(m, cmd)
@@ -171,6 +172,50 @@ func TestBackgroundSiteRefreshKeepsEvidenceVisibleAndDoesNotOverlap(t *testing.T
 	m = finish(m, cmd)
 	if m.reading || m.loading || !strings.Contains(m.frame(), "SITE PASSPORT") {
 		t.Fatal("completed background refresh did not retain the inspector")
+	}
+}
+
+func TestMenuPreviewDoesNotRunDiskInspectionAndReusesEvidence(t *testing.T) {
+	m := testDashboard(t)
+	m.source.Demo = false
+	index := menuIndex("disk")
+	cmd := m.previewMenu(index)
+	if cmd != nil || m.page != "disk" || !m.menuFocus || !strings.Contains(m.frame(), "ON-DEMAND INSPECTION") {
+		t.Fatal("browsing Disk started a remote scan or failed to preview it")
+	}
+	m, cmd = press(m, "right")
+	if cmd == nil || m.menuFocus || !m.loading {
+		t.Fatal("entering a cold inspection did not start its read")
+	}
+	v, _ := m.Update(loadedMsg{generation: m.generation, snapshot: m.snapshot, lines: []string{"RETAINED DISK ACCOUNTING"}})
+	m = v.(dashboard)
+	m.previewMenu(menuIndex("overview"))
+	cmd = m.previewMenu(index)
+	if cmd != nil || !strings.Contains(m.frame(), "RETAINED DISK ACCOUNTING") {
+		t.Fatal("revisiting an inspection discarded its evidence or ran another scan")
+	}
+}
+
+func TestToolsKeepsOptionalViewsOutOfMainMenu(t *testing.T) {
+	m := testDashboard(t)
+	for _, item := range menu {
+		if item.Page == "costs" || item.Page == "preflight" || item.Page == "deployments" {
+			t.Fatal("optional view remains in the main menu")
+		}
+	}
+	m, cmd := press(m, "a")
+	m = finish(m, cmd)
+	if m.page != "tools" || m.menuFocus {
+		t.Fatal("Tools shortcut did not open its content")
+	}
+	m, cmd = press(m, "enter")
+	m = finish(m, cmd)
+	if m.page != toolMenu[0].Page {
+		t.Fatal("Tools selection did not open the selected tool")
+	}
+	m, _ = press(m, "left")
+	if !m.menuFocus || menu[m.navSelected].Page != "tools" {
+		t.Fatal("Left from an optional tool did not focus its menu parent")
 	}
 }
 
@@ -289,7 +334,7 @@ func TestStaleEvidenceCannotShowPassingLayerSymbols(t *testing.T) {
 }
 func TestOfflineDemoEveryViewAvoidsRealInspection(t *testing.T) {
 	m := testDashboard(t)
-	for _, item := range menu {
+	for _, item := range allViews() {
 		if _, err := m.source.Page(m.ctx, item.Page, "", "caddy", m.snapshot); err != nil {
 			t.Fatalf("%s: %v", item.Page, err)
 		}

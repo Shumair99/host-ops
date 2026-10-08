@@ -1,6 +1,7 @@
 package console
 
 import (
+	"github.com/Shumair99/host-ops/internal/costs"
 	"github.com/Shumair99/host-ops/internal/metrics"
 	"strings"
 	"testing"
@@ -13,6 +14,18 @@ func TestUnknownAndIncompleteMetricsAreExplicit(t *testing.T) {
 	}
 	if !strings.Contains(Bar(nil, "cpu_percent", "CPU"), "UNKNOWN") {
 		t.Fatal("missing CPU displayed as zero")
+	}
+}
+
+func TestCostsShowsSetupInsteadOfUnknownTableAndHidesUnconfiguredFees(t *testing.T) {
+	text := strings.Join(Format("costs", costs.Report{}), "\n")
+	if strings.Contains(text, "ALLOCATED COST") || !strings.Contains(text, "billing set") {
+		t.Fatal("unconfigured cost view still shows an empty allocation table", text)
+	}
+	amount := 10.0
+	text = strings.Join(Format("costs", costs.Report{TotalCost: &amount, Currency: "GBP", Sites: []costs.Allocation{{Name: "site", Cost: &amount}}}), "\n")
+	if strings.Contains(text, "HOSTING FEE") || strings.Contains(text, "UNKNOWN") || !strings.Contains(text, "GBP 10.00") {
+		t.Fatal("unconfigured client fees still dominate cost view", text)
 	}
 }
 func TestConsoleTextCannotInjectTerminalEscapes(t *testing.T) {

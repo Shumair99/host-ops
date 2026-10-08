@@ -40,3 +40,19 @@ func TestConnectionOnlyConfigurationAndSSHPorts(t *testing.T) {
 		t.Fatal("manual mode accepted no sites")
 	}
 }
+
+func TestBillingRejectsMixedSourcesUnsafeResourcesAndTokenNames(t *testing.T) {
+	amount := 12.0
+	for _, b := range []*Billing{
+		{Provider: "hetzner", ResourceID: "../bad"},
+		{Provider: "hostinger", ResourceID: "valid", TokenEnv: "TOKEN=value"},
+		{Provider: "hetzner", ResourceID: "42", MonthlyAmount: &amount},
+		{Provider: "manual"},
+		{Provider: "manual", ResourceID: "42", MonthlyAmount: &amount},
+	} {
+		c := Config{Host: Host{ID: "h", Currency: "GBP", Billing: b}}
+		if c.Validate() == nil {
+			t.Fatal("invalid or ambiguous billing source accepted", b)
+		}
+	}
+}

@@ -11,6 +11,7 @@ import (
 type Event struct {
 	HostID     string    `json:"host_id"`
 	SiteID     string    `json:"site_id"`
+	SiteName   string    `json:"name,omitempty"`
 	ObservedAt time.Time `json:"observed_at"`
 	Type       string    `json:"type"`
 	Summary    string    `json:"summary"`
@@ -22,7 +23,7 @@ func Between(before, after model.Report) []Event {
 	out := []Event{}
 	add := func(kind, summary, old, new string) {
 		if old != new {
-			out = append(out, Event{HostID: after.HostID, SiteID: after.SiteID, ObservedAt: after.ObservedAt, Type: kind, Summary: summary, Before: old, After: new})
+			out = append(out, Event{HostID: after.HostID, SiteID: after.SiteID, SiteName: after.Name, ObservedAt: after.ObservedAt, Type: kind, Summary: summary, Before: old, After: new})
 		}
 	}
 	add("health_changed", "Site health changed", before.Overall, after.Overall)

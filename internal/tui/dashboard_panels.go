@@ -37,21 +37,23 @@ func durationLabel(seconds float64) string {
 }
 func (m dashboard) overviewLines(w int) []string {
 	out := m.resourcePanels(w)
+	out = append(out, m.systemSummary(w)...)
 	out = append(out, "")
-	out = append(out, m.siteTable(w, false)...)
+	out = append(out, m.overviewSiteTable(w)...)
 	events := []string{}
 	for _, r := range m.snapshot.Events[:min(4, len(m.snapshot.Events))] {
-		label := clean(r.SiteID)
-		if label == "" {
-			label = "host"
-		}
-		events = append(events, m.theme.paint(r.ObservedAt.Local().Format("15:04:05"), muted)+"  "+m.theme.paint(label, cyan)+"  "+m.theme.paint(recordSummary(r.Data), ink))
+		label := recordLabel(r, m.snapshot.Sites)
+		events = append(events, clip(m.theme.paint(r.ObservedAt.Local().Format("15:04"), muted)+"  "+m.theme.paint(pad(label, min(28, max(12, w/3))), cyan)+"  "+m.theme.paint(activitySummary(r), ink), w-4))
 	}
 	if len(events) == 0 {
 		events = []string{m.theme.paint("No recorded changes in 24h", muted)}
 	}
 	out = append(out, "")
-	return append(out, m.theme.panel("Recent activity", events, w)...)
+	title := "Recent activity"
+	if len(m.snapshot.Events) > 0 {
+		title += " / last change " + ageLabel(m.snapshot.Events[0].ObservedAt)
+	}
+	return append(out, m.theme.panel(title, events, w)...)
 }
 func (m dashboard) resourcePanels(w int) []string {
 	t := m.theme
@@ -267,75 +269,6 @@ func (t theme) stateCell(r model.Report, layer string, width int) string {
 	state := layerState(r, layer)
 	label := map[model.State]string{model.Pass: "OK", model.Fail: "FAIL", model.Warn: "WARN", model.Unknown: "UNKNOWN", model.Skip: "N/A"}[state]
 	return t.paint(pad(label, width), statusColor(string(state)))
-}
-func (m dashboard) siteTable(w int, selectable bool) []string {
-	t := m.theme
-	sites := m.sites()
-	if selectable {
-		sites = m.filteredSites()
-	}
-	healthy, attention, unknownCount := 0, 0, 0
-	for _, s := range m.sites() {
-		switch m.report(s.ID).Overall {
-		case "healthy":
-			healthy++
-		case "critical", "warning":
-			attention++
-		default:
-			unknownCount++
-		}
-	}
-	rows := []string{t.strong(fmt.Sprintf("%d", len(m.sites())), ink) + t.paint(" properties  ", muted) + t.paint(fmt.Sprintf("%d healthy", healthy), mint) + "  " + t.paint(fmt.Sprintf("%d attention", attention), amber) + "  " + t.paint(fmt.Sprintf("%d unknown", unknownCount), muted)}
-	if selectable && m.filter != "" {
-		rows = append(rows, t.paint("Filter  "+clean(m.filter), cyan))
-	}
-	type column struct {
-		label, layer string
-		width        int
-	}
-	cols := []column{{"Runtime", "runtime", 8}, {"Public HTTP", "public_http", 11}}
-	if w < 48 {
-		cols = []column{{"Public HTTP", "public_http", 11}}
-	}
-	if w >= 96 {
-		cols = []column{{"Runtime", "runtime", 8}, {"Local HTTP", "local_http", 11}, {"Proxy", "proxy_route", 6}, {"DNS", "dns", 5}, {"TLS", "tls", 5}, {"Public HTTP", "public_http", 11}}
-	}
-	available := w - 4
-	extra := 0
-	for _, c := range cols {
-		extra += c.width + 1
-	}
-	latency := w >= 78
-	if latency {
-		extra += 8
-	}
-	nameWidth := max(8, available-extra-12)
-	heading := pad("PROPERTY", nameWidth) + " " + pad("HEALTH", 10) + " "
-	for _, c := range cols {
-		heading += pad(c.label, c.width) + " "
-	}
-	if latency {
-		heading += "LATENCY"
-	}
-	rows = append(rows, t.paint(clip(heading, available), muted))
-	for i, s := range sites {
-		r := m.report(s.ID)
-		line := t.paint(pad(clean(s.Name), nameWidth), ink) + " " + t.paint(pad(strings.ToUpper(r.Overall), 10), statusColor(r.Overall)) + " "
-		for _, c := range cols {
-			line += t.stateCell(r, c.layer, c.width) + " "
-		}
-		if latency {
-			line += t.paint(httpLatency(r), muted)
-		}
-		if selectable && i == m.selected && !m.menuFocus {
-			line = t.selection(line, available)
-		}
-		rows = append(rows, clip(line, available))
-	}
-	if len(sites) == 0 {
-		rows = append(rows, t.paint("No matching properties", muted))
-	}
-	return t.panel("Production properties", rows, w)
 }
 func httpLatency(r model.Report) string {
 	n := 0.0

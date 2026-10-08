@@ -481,12 +481,16 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgup":
 			if m.menuFocus {
 				return m, m.previewMenu(max(0, m.navSelected-max(1, m.height-10)))
+			} else if m.page == "sites" {
+				m.selected = max(0, m.selected-max(1, m.height-10))
 			} else {
 				m.offset = max(0, m.offset-max(1, m.height-10))
 			}
 		case "pgdown":
 			if m.menuFocus {
 				return m, m.previewMenu(min(len(menu)-1, m.navSelected+max(1, m.height-10)))
+			} else if m.page == "sites" {
+				m.selected = min(max(0, len(m.filteredSites())-1), m.selected+max(1, m.height-10))
 			} else {
 				m.offset += max(1, m.height-10)
 			}

@@ -12,12 +12,14 @@ import (
 )
 
 type Snapshot struct {
+	SiteName   string            `json:"name,omitempty"`
 	HostID     string            `json:"host_id"`
 	SiteID     string            `json:"site_id"`
 	ObservedAt time.Time         `json:"observed_at"`
 	Values     map[string]string `json:"values"`
 }
 type Change struct {
+	SiteName   string    `json:"name,omitempty"`
 	HostID     string    `json:"host_id"`
 	SiteID     string    `json:"site_id"`
 	ObservedAt time.Time `json:"observed_at"`
@@ -45,7 +47,7 @@ func From(r model.Report) Snapshot {
 			values[check.Layer] = check.Summary
 		}
 	}
-	return Snapshot{HostID: r.HostID, SiteID: r.SiteID, ObservedAt: r.ObservedAt, Values: values}
+	return Snapshot{HostID: r.HostID, SiteID: r.SiteID, SiteName: r.Name, ObservedAt: r.ObservedAt, Values: values}
 }
 
 func Between(before, after Snapshot) []Change {
@@ -70,7 +72,7 @@ func Between(before, after Snapshot) []Change {
 			if !oldOK || !newOK {
 				kind = "observation_availability"
 			}
-			changes = append(changes, Change{HostID: after.HostID, SiteID: after.SiteID, ObservedAt: after.ObservedAt, Field: key, Before: old, After: new, Type: kind})
+			changes = append(changes, Change{HostID: after.HostID, SiteID: after.SiteID, SiteName: after.SiteName, ObservedAt: after.ObservedAt, Field: key, Before: old, After: new, Type: kind})
 		}
 	}
 	return changes

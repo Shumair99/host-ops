@@ -175,7 +175,7 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 			snapshot.Disk = &disk
 		}
 	}
-	snapshot.Events, err = s.Store.Query(ctx, s.Config.Host.ID, "", "event", time.Now().Add(-24*time.Hour), 12)
+	snapshot.Events, err = s.activity(ctx, "", 12)
 	return snapshot, err
 }
 
@@ -311,15 +311,12 @@ func (s Source) Evidence(ctx context.Context, page, siteID, target string, snaps
 			return nil, err
 		}
 		if page == "events" {
-			for _, extra := range []string{"change", "deployment"} {
-				more, err := s.Store.Query(ctx, s.Config.Host.ID, siteID, extra, time.Now().Add(-24*time.Hour), 100)
-				if err != nil {
-					return nil, err
-				}
-				records = append(records, more...)
+			records, err = s.activity(ctx, siteID, 100)
+			if err != nil {
+				return nil, err
 			}
 		}
-		return timelineLines(page, records), nil
+		return timelineLines(page, records, timelineLabels(s.Config.Sites)), nil
 	}
 }
 

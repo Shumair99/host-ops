@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/model"
@@ -46,7 +47,7 @@ func (m dashboard) liveLines() []string {
 	case "overview":
 		return m.overviewLines(w)
 	case "sites":
-		return m.siteTable(w, true)
+		return m.sitesWorkspace(w)
 	case "host":
 		return m.hostLines(w)
 	case "site":
@@ -153,12 +154,16 @@ func (m dashboard) frame() string {
 	if m.collectErr != "" {
 		state = "COLLECTION ERROR"
 	}
-	rows = append(rows, pad(t.paint(host, ink)+"  "+t.paint(state, statusColor(state))+"  "+t.paint("Observed "+ageLabel(m.snapshot.Host.ObservedAt), muted), w), t.paint(strings.Repeat("─", w), edge))
+	header := t.paint(host, ink) + "  " + t.paint(state, statusColor(state))
+	if m.source.Live && m.snapshot.Connection.Connected && !m.snapshot.Host.ObservedAt.IsZero() && time.Since(m.snapshot.Host.ObservedAt) > 5*time.Second {
+		header += t.paint("  TELEMETRY STALE · "+ageLabel(m.snapshot.Host.ObservedAt), amber)
+	}
+	rows = append(rows, pad(header, w), t.paint(strings.Repeat("─", w), edge))
 	content := wrap(m.liveLines(), m.bodyWidth())
 	bodyHeight := m.bodyHeight()
 	offset := min(m.offset, max(0, len(content)-bodyHeight))
 	if m.page == "sites" {
-		offset = min(max(0, m.selected-bodyHeight+5), max(0, len(content)-bodyHeight))
+		offset = 0 // The workspace windows its list and keeps selected details visible.
 	} else if m.page == "tools" {
 		offset = min(max(0, m.toolSelected-bodyHeight+4), max(0, len(content)-bodyHeight))
 	}

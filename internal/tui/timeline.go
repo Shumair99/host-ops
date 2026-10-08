@@ -11,7 +11,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/storage"
 )
 
-func timelineLines(page string, records []storage.Record) []string {
+func timelineLines(page string, records []storage.Record, identities ...map[string]string) []string {
 	sort.SliceStable(records, func(i, j int) bool { return records[i].ObservedAt.After(records[j].ObservedAt) })
 	if len(records) > 100 {
 		records = records[:100]
@@ -39,6 +39,9 @@ func timelineLines(page string, records []storage.Record) []string {
 		if label == "" {
 			label = "host"
 		}
+		if len(identities) > 0 && identities[0][record.SiteID] != "" {
+			label = identities[0][record.SiteID]
+		}
 		if record.Kind == "health" || record.Kind == "external_health" {
 			var report model.Report
 			if json.Unmarshal(record.Data, &report) == nil {
@@ -51,7 +54,13 @@ func timelineLines(page string, records []storage.Record) []string {
 		}
 		var data map[string]any
 		json.Unmarshal(record.Data, &data)
+		if name, _ := data["name"].(string); name != "" {
+			label = name
+		}
 		summary := recordSummary(record.Data)
+		if record.Kind == "event" || record.Kind == "incident" {
+			summary = activitySummary(record)
+		}
 		if record.Kind == "change" {
 			summary = "Changed: " + textField(data, "field")
 		}

@@ -61,6 +61,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/security", s.security)
 	mux.HandleFunc("GET /api/costs", s.costs)
 	mux.HandleFunc("GET /api/capacity", s.capacity)
+	mux.HandleFunc("GET /api/recovery", s.recovery)
+	mux.HandleFunc("GET /api/sites/{site}/recovery", s.recovery)
+	mux.HandleFunc("POST /api/backups", s.backup)
+	mux.HandleFunc("POST /api/restores", s.restore)
 	mux.HandleFunc("GET /api/ownership", func(w http.ResponseWriter, r *http.Request) {
 		JSON(w, 200, security.Ownership(s.Config, r.URL.Query().Get("resource")))
 	})

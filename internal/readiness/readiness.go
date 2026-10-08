@@ -7,6 +7,7 @@ import (
 
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/model"
+	"github.com/Shumair99/host-ops/internal/recovery"
 	"github.com/Shumair99/host-ops/internal/storage"
 )
 
@@ -138,18 +139,18 @@ func Assess(ctx context.Context, c config.Config, site config.Site, r model.Repo
 		return Assessment{}, err
 	}
 	if len(b) > 0 {
-		var data map[string]any
+		var data recovery.Backup
 		json.Unmarshal(b[0].Data, &data)
-		ev.Backup = data["status"] == "succeeded"
+		ev.Backup = data.Status == "succeeded" && !data.CompletedAt.IsZero() && now.Sub(data.CompletedAt) <= backupWindow
 	}
 	restores, err := query("restore", now.Add(-30*24*time.Hour), 1)
 	if err != nil {
 		return Assessment{}, err
 	}
 	if len(restores) > 0 {
-		var data map[string]any
+		var data recovery.Restore
 		json.Unmarshal(restores[0].Data, &data)
-		ev.Restore = data["status"] == "verified" && data["health_verified"] == true
+		ev.Restore = data.Status == "verified" && data.HealthVerified && data.IsolationVerified && !data.CompletedAt.IsZero() && now.Sub(data.CompletedAt) <= 30*24*time.Hour
 	}
 	return Evaluate(site, r, ev, now), nil
 }

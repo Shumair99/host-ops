@@ -16,6 +16,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
 	"github.com/Shumair99/host-ops/internal/readiness"
+	"github.com/Shumair99/host-ops/internal/recovery"
 	"github.com/Shumair99/host-ops/internal/security"
 	"github.com/Shumair99/host-ops/internal/storage"
 )
@@ -72,6 +73,20 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 		return 1
 	}
 	defer store.Close()
+	if command == "recovery" {
+		sites, _ := c.Select(id)
+		reports := []recovery.Assessment{}
+		for _, site := range sites {
+			report, err := recovery.Assess(ctx, c, site, store)
+			if err != nil {
+				fmt.Fprintln(errOut, "Recovery evidence unavailable")
+				return 1
+			}
+			reports = append(reports, report)
+		}
+		encoder.Encode(reports)
+		return 0
+	}
 	if command == "costs" {
 		report, err := costs.Assess(ctx, c, store)
 		if err != nil {

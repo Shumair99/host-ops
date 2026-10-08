@@ -14,12 +14,17 @@ import (
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
 	"github.com/Shumair99/host-ops/internal/readiness"
+	"github.com/Shumair99/host-ops/internal/security"
 	"github.com/Shumair99/host-ops/internal/storage"
 )
 
 func query(ctx context.Context, c config.Config, command, id, db, since string, out, errOut io.Writer) int {
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
+	if command == "ownership" {
+		encoder.Encode(security.Ownership(c, id))
+		return 0
+	}
 	if command == "logs" {
 		if id == "" {
 			fmt.Fprintln(errOut, "logs requires a site")
@@ -65,6 +70,20 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 		return 1
 	}
 	defer store.Close()
+	if command == "security" || command == "orphans" {
+		reports, err := store.Latest(ctx, c.Host.ID)
+		if err != nil {
+			fmt.Fprintln(errOut, "Runtime evidence unavailable")
+			return 1
+		}
+		report := security.Inspect(ctx, c, reports, platform.Command{Host: c.Host})
+		if command == "orphans" {
+			encoder.Encode(report.PossibleOrphans)
+		} else {
+			encoder.Encode(report)
+		}
+		return 0
+	}
 	if command == "readiness" {
 		reports, err := store.Latest(ctx, c.Host.ID)
 		if err != nil {

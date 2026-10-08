@@ -33,6 +33,9 @@ Commands:
   diff [site]       Read infrastructure changes (--since 24h)
   incidents         Read persisted outage and recovery evidence
   readiness [site]  Explain the production readiness score
+  security          Inspect posture, publications and listening sockets
+  orphans           Review possible stopped/unregistered resource candidates
+  ownership <name>  Find the site owning a container, domain or configured port
 
 Options:
   --config FILE     Manifest (default: HOSTOPS_CONFIG or hostops.json)
@@ -47,7 +50,7 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return 0
 	}
 	command := args[0]
-	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" {
+	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" && command != "security" && command != "orphans" && command != "ownership" {
 		fmt.Fprintf(errOut, "unknown command %q\n", command)
 		return 1
 	}
@@ -82,14 +85,18 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
-	sites, err := c.Select(id)
+	selectionID := id
+	if command == "ownership" {
+		selectionID = ""
+	}
+	sites, err := c.Select(selectionID)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
-	if command == "metrics" || command == "history" || command == "disk" || command == "events" || command == "deployments" || command == "logs" || command == "diff" || command == "incidents" || command == "readiness" {
+	if command == "metrics" || command == "history" || command == "disk" || command == "events" || command == "deployments" || command == "logs" || command == "diff" || command == "incidents" || command == "readiness" || command == "security" || command == "orphans" || command == "ownership" {
 		return query(ctx, c, command, id, *db, *since, out, errOut)
 	}
 	if command == "sites" {

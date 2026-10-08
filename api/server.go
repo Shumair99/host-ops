@@ -17,6 +17,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/logs"
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
+	"github.com/Shumair99/host-ops/internal/security"
 	"github.com/Shumair99/host-ops/internal/storage"
 )
 
@@ -57,6 +58,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sites/{site}", s.site)
 	mux.HandleFunc("GET /api/sites/{site}/readiness", s.readiness)
 	mux.HandleFunc("GET /api/readiness", s.readiness)
+	mux.HandleFunc("GET /api/security", s.security)
+	mux.HandleFunc("GET /api/ownership", func(w http.ResponseWriter, r *http.Request) {
+		JSON(w, 200, security.Ownership(s.Config, r.URL.Query().Get("resource")))
+	})
 	mux.HandleFunc("GET /api/history", func(w http.ResponseWriter, r *http.Request) { s.records(w, r, "health") })
 	mux.HandleFunc("GET /api/metrics", func(w http.ResponseWriter, r *http.Request) {
 		kind := "metrics"

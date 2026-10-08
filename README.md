@@ -19,14 +19,24 @@ In CMD, use `cd /d C:\path\to\host-ops` and `bin\hostops.exe dashboard --demo`. 
 
 ## Connect a VPS
 
-Build or obtain the full bundle, including `collectors/linux-amd64/hostops` and `collectors/linux-arm64/hostops` beside the main executable. With SSH access and a trusted host key already set up:
+Build or obtain the full bundle, including the Linux discovery collectors and optional VPS history agents beside the main executable. With SSH key authentication and a trusted host key already set up, use the guided workflow:
+
+```powershell
+.\bin\hostops.exe start user@vps
+```
+
+The first run discovers supported routes, saves ignored settings to `local/hostops.json`, then asks whether to enable the optional rolling history service. It retains at most 30 minutes of host metrics and opens no public port. Installation uses `sudo` over the SSH terminal for a non-root account; a direct root SSH login already has the required authorization. HostOps does not save any password. Automated SSH password login is not supported: configure an identity through your SSH agent/config or pass `--identity C:/path/to/key`. Use `--port 2222` for a non-default SSH port.
+
+The service runs on Linux amd64/arm64 with systemd. It uses a dedicated no-login `hostops` account, has no Linux capabilities, and grants the configured SSH account access only to the local telemetry socket and small history file. It does not scan site files or read file contents. Manage it later with `hostops agent status`, `hostops agent install`, or `hostops agent uninstall`.
+
+The older two-step workflow remains available:
 
 ```powershell
 .\bin\hostops.exe connect user@vps
 .\bin\hostops.exe dashboard
 ```
 
-`connect` verifies the connection, discovers supported routes, and saves ignored connection settings to `local/hostops.json`. Use `--identity C:/path/to/key` or `--port 2222` when needed; SSH aliases and existing SSH configuration also work. No private key contents are copied into settings. On this workspace, the existing connection is ready:
+Use `--identity C:/path/to/key` or `--port 2222` when needed; SSH aliases and existing SSH configuration also work. No private key contents are copied into settings. On this workspace, the existing connection is ready:
 
 ```powershell
 .\bin\hostops.exe dashboard --config local/hostops.json

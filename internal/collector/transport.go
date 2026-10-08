@@ -16,20 +16,23 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/discovery"
 	"github.com/Shumair99/host-ops/internal/platform"
+	"github.com/Shumair99/host-ops/internal/vpsagent"
 )
 
 type Session struct {
-	cancel  context.CancelFunc
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	scanner *bufio.Scanner
-	host    string
-	mu      sync.Mutex
-	once    sync.Once
+	cancel     context.CancelFunc
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	scanner    *bufio.Scanner
+	host       string
+	mu         sync.Mutex
+	once       sync.Once
+	persistent bool
 }
 
 func sshArgs(h config.Host) []string {
@@ -154,10 +157,66 @@ func Start(ctx context.Context, c config.Config, path string) (*Session, error) 
 	return s, nil
 }
 
+// StartPersistent attaches to the installed VPS collector through the existing
+// strict-host-key SSH session. The fixed bridge command only relays the
+// read-only Unix-socket stream; it accepts no command or path from the client.
+func StartPersistent(ctx context.Context, c config.Config) (*Session, error) {
+	if c.Host.SSH == "" || c.Host.HistoryMode != "continuous" {
+		return nil, fmt.Errorf("persistent VPS history is not enabled for this host")
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	remote := platform.Quote("/usr/local/libexec/hostops-vps-agent") + " bridge"
+	args := sshArgs(c.Host)
+	// This is a new login so a group added by the installer is applied even
+	// when the user's SSH configuration normally reuses a ControlMaster.
+	for i, arg := range args {
+		if arg == "--" {
+			args = append(args[:i], append([]string{"-o", "ControlMaster=no", "-o", "ControlPath=none"}, args[i:]...)...)
+			break
+		}
+	}
+	cmd := exec.CommandContext(ctx, "ssh", append(args, remote)...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		_ = stdin.Close()
+		return nil, err
+	}
+	cmd.Stderr = io.Discard
+	if err = cmd.Start(); err != nil {
+		cancel()
+		_ = stdin.Close()
+		return nil, fmt.Errorf("persistent VPS collector launch failed")
+	}
+	s := &Session{cancel: cancel, cmd: cmd, stdin: stdin, scanner: bufio.NewScanner(stdout), host: c.Host.ID, persistent: true}
+	s.scanner.Buffer(make([]byte, 4096), vpsagent.MaxFrameBytes)
+	if err = json.NewEncoder(stdin).Encode(vpsagent.Request{Version: vpsagent.ProtocolVersion, HostID: c.Host.ID}); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("persistent VPS collector request failed")
+	}
+	if err = stdin.Close(); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("persistent VPS collector request failed")
+	}
+	return s, nil
+}
+
 func (s *Session) Next() (Message, error) {
 	var m Message
 	if !s.scanner.Scan() {
 		return m, fmt.Errorf("collector disconnected or exceeded frame limit")
+	}
+	if s.persistent {
+		frame, err := vpsagent.DecodeFrame(s.scanner.Bytes(), s.host, time.Now())
+		if err != nil {
+			return m, err
+		}
+		return Message{Version: frame.Version, HostID: frame.HostID, Kind: frame.Kind, Sample: frame.Sample, Samples: frame.Samples}, nil
 	}
 	if json.Unmarshal(s.scanner.Bytes(), &m) != nil || m.Version != discovery.ProtocolVersion || m.HostID != s.host {
 		return m, fmt.Errorf("collector protocol or host mismatch")
@@ -165,6 +224,9 @@ func (s *Session) Next() (Message, error) {
 	return m, nil
 }
 func (s *Session) Refresh() error {
+	if s.persistent {
+		return fmt.Errorf("persistent collector does not accept control commands")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return json.NewEncoder(s.stdin).Encode(Control{Kind: "refresh"})

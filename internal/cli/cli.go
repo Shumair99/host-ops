@@ -28,8 +28,15 @@ const Help = `Amadeus HostOps - terminal-only production website operations
 
 Usage: hostops <command> [site] [options]
 
+First run: hostops start [user@vps] [--identity FILE] [--port PORT]
+History:   hostops agent install|status|uninstall [--config FILE]
+
 Commands:
+  start             Guided setup, then open the live terminal dashboard
   connect TARGET    Save an SSH connection and discover sites automatically
+  agent install     Install the optional 30-minute VPS history service
+  agent status      Check the VPS history service
+  agent uninstall   Remove the VPS service and its retained history
   discover          Refresh and explain the automatic inventory
   dashboard         Open the terminal monitoring dashboard (default)
   sites             Refresh and list automatically discovered sites
@@ -85,6 +92,12 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 		args = []string{"dashboard"}
 	}
 	command := args[0]
+	if command == "start" {
+		return startCommand(ctx, args[1:], input, out, errOut)
+	}
+	if command == "agent" {
+		return agentCommand(ctx, args[1:], input, out, errOut)
+	}
 	if command == "connect" {
 		return connect(ctx, args[1:], out, errOut)
 	}

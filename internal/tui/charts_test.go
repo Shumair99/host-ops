@@ -33,14 +33,15 @@ func TestAllTrendLevelsUseClassicWindowsConsoleGlyphs(t *testing.T) {
 		m.theme.color = colored
 		for _, values := range [][]float64{{0, 0, 0}, {0, 0.001, 1, 2, 3, 4, 5, 6, 7, 8}, {38.8, 38.8, 38.8}} {
 			m.snapshot.History = nil
+			start := time.Now().Add(-time.Duration(len(values)-1) * 15 * time.Second)
 			for i, n := range values {
 				m.snapshot.History = append(m.snapshot.History, metrics.Sample{
-					ObservedAt: time.Unix(int64(i*15), 0),
+					ObservedAt: start.Add(time.Duration(i*15) * time.Second),
 					Values:     map[string]float64{"cpu_percent": n},
 				})
 			}
 			spark := m.spark("cpu_percent", len(values), cyan)
-			if len(spark) != 2 {
+			if len(spark) != 4 {
 				t.Fatalf("sparkline has %d rows", len(spark))
 			}
 			for _, row := range spark {

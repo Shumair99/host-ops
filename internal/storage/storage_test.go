@@ -68,3 +68,47 @@ func TestInventoryRetentionKeepsLatestAndOperationalEvidence(t *testing.T) {
 		t.Fatal("operational evidence was removed by telemetry retention", evidence, err)
 	}
 }
+
+func TestAddUniqueDeduplicatesReplayedHostHistory(t *testing.T) {
+	store, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	at := time.Date(2026, 10, 8, 19, 12, 0, 123, time.UTC)
+	sample := map[string]any{"host_id": "server-1", "cpu_percent": 12.5}
+	inserted, err := store.AddUnique(context.Background(), "server-1", "", "host_metrics", at, sample)
+	if err != nil || !inserted {
+		t.Fatalf("first sample was not inserted: %v, %v", inserted, err)
+	}
+	inserted, err = store.AddUnique(context.Background(), "server-1", "", "host_metrics", at, sample)
+	if err != nil || inserted {
+		t.Fatalf("replayed sample was inserted twice: %v, %v", inserted, err)
+	}
+	records, err := store.Query(context.Background(), "server-1", "", "host_metrics", at.Add(-time.Second), 100)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("expected one stored history sample, got %d: %v", len(records), err)
+	}
+}
+
+func TestRetentionPrunesPersistentHistoryDedupKeys(t *testing.T) {
+	store, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	old := time.Now().Add(-100 * 24 * time.Hour)
+	for i := 0; i < 2; i++ {
+		if _, err := store.AddUnique(ctx, "h", "", "host_metrics", old.Add(time.Duration(i)*time.Minute), map[string]int{"sample": i}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Retain(ctx, 90*24*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := store.DB.QueryRow(`SELECT count(*) FROM history_imports`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("expired history dedup keys retained: count %d, err %v", count, err)
+	}
+}

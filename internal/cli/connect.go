@@ -86,7 +86,7 @@ func connect(ctx context.Context, args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
-	fmt.Fprintf(out, "Connected. %d sites are in the automatic inventory. Settings: %s\nRun hostops dashboard to open the terminal dashboard.\n", len(resolved.Sites), *file)
+	fmt.Fprintf(out, "Connected. %d sites are in the automatic inventory. Settings: %s\nRun hostops start to configure history and open the dashboard, or hostops dashboard to open it directly.\n", len(resolved.Sites), *file)
 	return 0
 }
 

@@ -325,11 +325,15 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 		return err
 	}
 	defer session.Close()
-	frames := make(chan collector.Message, 4)
-	failures := make(chan error, 1)
-	go func() {
+	type incoming struct {
+		message collector.Message
+		source  string
+	}
+	frames := make(chan incoming, 8)
+	failures := make(chan error, 2)
+	readStream := func(source string, current *collector.Session) {
 		for {
-			m, err := session.Next()
+			m, err := current.Next()
 			if err != nil {
 				select {
 				case failures <- err:
@@ -338,12 +342,22 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 				return
 			}
 			select {
-			case frames <- m:
+			case frames <- incoming{message: m, source: source}:
 			case <-ctx.Done():
 				return
 			}
 		}
-	}()
+	}
+	go readStream("collector", session)
+	var historySession *collector.Session
+	if c.Host.HistoryMode == "continuous" {
+		historySession, err = collector.StartPersistent(ctx, c)
+		if err != nil {
+			return err
+		}
+		defer historySession.Close()
+		go readStream("persistent", historySession)
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	results := make(chan publicResult, 1)
@@ -390,7 +404,8 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 			if err := persistReports(ctx, resolved, store, baseReports(resolved, registry, public)); err != nil {
 				return err
 			}
-		case message := <-frames:
+		case frame := <-frames:
+			message := frame.message
 			switch message.Kind {
 			case "hello":
 				if err := connection(ctx, store, c.Host.ID, true, ""); err != nil {
@@ -410,6 +425,9 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 				}
 				launch()
 			case "host_metrics":
+				if frame.source == "collector" && c.Host.HistoryMode == "continuous" {
+					continue
+				}
 				if message.Sample == nil || message.Sample.HostID != c.Host.ID {
 					return fmt.Errorf("invalid host telemetry")
 				}
@@ -418,10 +436,28 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 					return err
 				}
 				if time.Since(lastHistory) >= 15*time.Second {
-					if _, err = store.Add(ctx, c.Host.ID, "", "host_metrics", sample.ObservedAt, sample); err != nil {
+					if _, err = store.AddUnique(ctx, c.Host.ID, "", "host_metrics", sample.ObservedAt, sample); err != nil {
 						return err
 					}
 					lastHistory = time.Now()
+				}
+			case "history":
+				if frame.source != "persistent" || len(message.Samples) > 128 {
+					return fmt.Errorf("invalid persistent host history")
+				}
+				for _, sample := range message.Samples {
+					if sample.HostID != c.Host.ID || sample.SiteID != "" {
+						return fmt.Errorf("persistent history host mismatch")
+					}
+					if _, err = store.AddUnique(ctx, c.Host.ID, "", "host_metrics", sample.ObservedAt, sample); err != nil {
+						return err
+					}
+				}
+				if len(message.Samples) > 0 {
+					latest := message.Samples[len(message.Samples)-1]
+					if err = store.Transition(ctx, c.Host.ID, "", "host_metrics", latest, "", latest.ObservedAt, nil); err != nil {
+						return err
+					}
 				}
 			case "workload_metrics":
 				historyDue := time.Since(lastWorkloadHistory) >= 15*time.Second

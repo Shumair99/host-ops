@@ -1,0 +1,43 @@
+[Unit]
+Description=HostOps rolling VPS telemetry
+After=local-fs.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=hostops
+Group=hostops-readers
+WorkingDirectory=/var/lib/hostops
+UMask=0027
+ExecStart=/usr/local/libexec/hostops-vps-agent serve --host-id @HOST_ID@
+Environment=GOMAXPROCS=1
+Environment=GOMEMLIMIT=24MiB
+Restart=on-failure
+RestartSec=5s
+RuntimeDirectory=hostops
+RuntimeDirectoryMode=0750
+StateDirectory=hostops
+StateDirectoryMode=0750
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/run/hostops /var/lib/hostops
+LimitNOFILE=32
+TasksMax=8
+
+[Install]
+WantedBy=multi-user.target

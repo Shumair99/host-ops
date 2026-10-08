@@ -41,6 +41,17 @@ func TestConnectionOnlyConfigurationAndSSHPorts(t *testing.T) {
 	}
 }
 
+func TestHistoryModeHasOnlyExplicitSupportedValues(t *testing.T) {
+	for _, mode := range []string{"", "session", "continuous"} {
+		if err := (&Config{Host: Host{ID: "h", HistoryMode: mode}}).Validate(); err != nil {
+			t.Fatalf("supported history mode %q rejected: %v", mode, err)
+		}
+	}
+	if err := (&Config{Host: Host{ID: "h", HistoryMode: "always"}}).Validate(); err == nil {
+		t.Fatal("unknown history mode accepted")
+	}
+}
+
 func TestBillingRejectsMixedSourcesUnsafeResourcesAndTokenNames(t *testing.T) {
 	amount := 12.0
 	for _, b := range []*Billing{

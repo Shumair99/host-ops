@@ -42,6 +42,7 @@ type Host struct {
 	Currency          string      `json:"currency,omitempty"`
 	DiskRoots         []string    `json:"disk_roots,omitempty"`
 	DiskScanDisabled  bool        `json:"disk_scan_disabled,omitempty"`
+	HistoryMode       string      `json:"history_mode,omitempty"`
 }
 
 // Billing selects one explicit source. Secrets remain in the named environment
@@ -148,6 +149,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Host.SSHPort < 0 || c.Host.SSHPort > 65535 {
 		return fmt.Errorf("SSH port must be 1..65535, or zero for the SSH default")
+	}
+	if c.Host.HistoryMode != "" && c.Host.HistoryMode != "session" && c.Host.HistoryMode != "continuous" {
+		return fmt.Errorf("host.history_mode must be session or continuous")
 	}
 	if c.Host.CaddyContainer != "" && !identifier.MatchString(c.Host.CaddyContainer) {
 		return fmt.Errorf("invalid Caddy container")

@@ -47,7 +47,13 @@ Color is automatic in the interactive dashboard. Set `NO_COLOR` or use `--color 
 
 ## Live use
 
-Your existing private manifest is at `local/hostops.json`. Start:
+Your existing private manifest is at `local/hostops.json`. For guided first-time setup, run:
+
+```powershell
+.\bin\hostops.exe start user@vps
+```
+
+To open the current connection directly:
 
 ```powershell
 .\bin\hostops.exe dashboard --config local/hostops.json
@@ -55,11 +61,11 @@ Your existing private manifest is at `local/hostops.json`. Start:
 .\scripts\dev.ps1
 ```
 
-The header now says `LIVE / READ-ONLY`. The dashboard loads retained observations and starts one streaming SSH collector. CPU/RAM update every second using direct `/proc` reads, without spawning commands for those counters. Container stats and inventory/root disk update every 30 seconds. Container stats run immediately after the first inventory, then follow that schedule. Public HTTP uses `--interval` (default 30 seconds); DNS/TLS use five minutes. The first resource sample appears automatically, without pressing a key. Background refreshes keep the current evidence visible; only opening a new inspector shows its initial loading message. Closing the dashboard cancels its reads and stops its collector.
+The header now says `LIVE / READ-ONLY`. The dashboard loads retained observations and starts one streaming SSH collector. CPU/RAM update every second using direct `/proc` reads, without spawning commands for those counters. Container stats and inventory/root disk update every 30 seconds. Container stats run immediately after the first inventory, then follow that schedule. Public HTTP uses `--interval` (default 30 seconds); DNS/TLS use five minutes. The first resource sample appears automatically, without pressing a key. Background refreshes keep the current evidence visible; only opening a new inspector shows its initial loading message. Without the optional VPS service, closing the dashboard stops live collection. With it enabled, a low-privilege systemd process keeps a rolling 30-minute host-metric history for the next connection.
 
 The sites list comes from discovered proxy domains. Your existing reference property's JSON entry retains its display name and health preferences; other sites appear without registration. Overview and Sites show one row for an observed base domain and its `www` variant. That row reflects the worst health across both domains. Open the site inspector to see both addresses and their independent checks, including any `www`-only failure. Filtering by either address finds the same site. A standalone `www` domain and unrelated subdomains remain separate sites; no unobserved address is invented. Press `z` to inspect the individual source, route and workload facts. Wildcard/catch-all routes stay visible as coverage patterns. Public checks run from this computer, while the collector reads host/runtime configuration on the VPS.
 
-For another VPS, run `hostops connect user@vps` first, optionally with `--identity FILE` or `--port 2222`. It writes connection settings after a successful inspection. SSH uses your existing identity and trusted host key in batch mode. The bundled Linux collector runs from the remote user's private cache; it installs no service and needs no dashboard token. A missing or old Disk index is scanned in the background after discovery and cached for 30 minutes. Security, Preflight and runtime log views run bounded inspections on demand. You can switch views or quit during a storage scan. See [discovery support and limitations](discovery.md) and [storage scope, overhead and controls](storage.md).
+For another VPS, `hostops start user@vps` guides the connection and asks whether to install the always-on host-metric service. SSH uses your existing identity and trusted host key in batch mode. The regular discovery collector runs from the remote user's private cache and exits with its SSH session. The optional history service is separate; a non-root SSH account authorizes installation with sudo, while a root SSH login already has that authority. It retains a rolling 30 minutes of CPU, memory, load, uptime and root-filesystem measurements. Use `hostops agent status|install|uninstall` to manage it. A missing or old Disk index is scanned in the background after discovery and cached for 30 minutes. Security, Preflight and runtime log views run bounded inspections on demand. You can switch views or quit during a storage scan. See [discovery support and limitations](discovery.md), [storage scope, overhead and controls](storage.md), and [service security boundaries](security.md).
 
 The live root disk was measured at 88% used during verification. Open `d` to inspect directory sizes and Docker storage. Figures marked incomplete are lower bounds, not full totals. HostOps supplies evidence for a later cleanup decision; no keyboard shortcut deletes files or prunes Docker.
 

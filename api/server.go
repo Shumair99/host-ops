@@ -25,6 +25,7 @@ type Server struct {
 	Store  *storage.Store
 	Token  string
 	MaxAge time.Duration
+	WebDir string
 }
 
 func Loopback(address string) bool {
@@ -47,6 +48,9 @@ func Error(w http.ResponseWriter, status int, message string) {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	if s.WebDir != "" {
+		mux.Handle("GET /", http.FileServer(http.Dir(s.WebDir)))
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { JSON(w, 200, map[string]string{"status": "alive"}) })
 	mux.HandleFunc("GET /api/sites", func(w http.ResponseWriter, r *http.Request) { JSON(w, 200, s.Config.Sites) })
 	mux.HandleFunc("GET /api/status", s.status)
@@ -94,7 +98,8 @@ func (s *Server) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if r.URL.Path != "/healthz" {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
 			if len(s.Token) < 32 || subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")), []byte(s.Token)) != 1 {
 				Error(w, 401, "Authentication required")
 				return

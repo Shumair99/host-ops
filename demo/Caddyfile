@@ -1,0 +1,10 @@
+{
+    admin localhost:2019
+    auto_https off
+}
+http://a.demo.local {
+    reverse_proxy demo-site-a:80
+}
+http://b.demo.local {
+    reverse_proxy demo-site-b:80
+}

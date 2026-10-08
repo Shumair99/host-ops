@@ -1,0 +1,7 @@
+{
+  "host": { "id": "demo-host", "name": "Demo host", "caddy_container": "demo-caddy", "monthly_cost": 12, "currency": "GBP" },
+  "sites": [
+    { "id": "client-a", "host_id": "demo-host", "name": "Client A", "repository": "example/client-a", "branch": "main", "runtime": { "type": "docker", "container": "demo-site-a", "network": "hostops-demo-web", "port": 80 }, "proxy": { "domain": "a.demo.local", "upstream": "demo-site-a:80" }, "health": { "public_url": "http://a.demo.local/healthz", "path": "/healthz", "expected_status": 200 }, "business": { "client": "Client A", "monthly_fee": 15 } },
+    { "id": "client-b", "host_id": "demo-host", "name": "Client B", "repository": "example/client-b", "branch": "main", "runtime": { "type": "docker", "container": "demo-site-b", "network": "hostops-demo-web", "port": 80 }, "proxy": { "domain": "b.demo.local", "upstream": "demo-site-b:80" }, "health": { "public_url": "http://b.demo.local/healthz", "path": "/healthz", "expected_status": 200 }, "business": { "client": "Client B", "monthly_fee": 20 } }
+  ]
+}

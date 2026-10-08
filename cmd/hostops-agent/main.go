@@ -19,6 +19,8 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:9090", "private management API")
 	interval := flag.Duration("interval", 30*time.Second, "collection interval")
 	once := flag.Bool("once", false, "collect once without serving API")
+	webDir := flag.String("web", "web/dist", "built dashboard directory")
+	allowPrivate := flag.Bool("allow-private-listen", false, "explicitly permit a container/private listener; keep the published port loopback-only")
 	flag.Parse()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -34,7 +36,7 @@ func main() {
 	if *once {
 		err = agent.Cycle(ctx, c, store)
 	} else {
-		err = agent.Run(ctx, c, store, *listen, os.Getenv("HOSTOPS_TOKEN"), *interval)
+		err = agent.Run(ctx, c, store, *listen, os.Getenv("HOSTOPS_TOKEN"), *webDir, *interval, *allowPrivate)
 	}
 	if err != nil {
 		log.Fatal(err)

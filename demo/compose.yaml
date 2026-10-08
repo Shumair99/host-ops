@@ -1,0 +1,53 @@
+name: hostops-demo
+services:
+  agent:
+    build:
+      context: ..
+    container_name: demo-hostops
+    command: ["--config", "/etc/hostops/sites.json", "--db", "/var/lib/hostops/history.db", "--web", "/opt/hostops/web", "--listen", "0.0.0.0:9090", "--allow-private-listen", "--interval", "10s"]
+    environment:
+      HOSTOPS_TOKEN: ${HOSTOPS_TOKEN:?Set a random HOSTOPS_TOKEN with at least 32 characters}
+    ports: ["127.0.0.1:9090:9090"]
+    volumes:
+      - ./sites.json:/etc/hostops/sites.json:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - history:/var/lib/hostops
+    networks: [demo_web]
+    depends_on: [caddy, site-a, site-b]
+  caddy:
+    image: caddy:2-alpine
+    container_name: demo-caddy
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro"]
+    ports: ["127.0.0.1:8088:80"]
+    networks:
+      demo_web:
+        aliases: [a.demo.local, b.demo.local]
+  site-a:
+    image: nginx:stable-alpine
+    container_name: demo-site-a
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run, /tmp]
+    volumes: ["./site:/usr/share/nginx/html:ro"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 5s
+      retries: 2
+    networks: [demo_web]
+  site-b:
+    image: nginx:stable-alpine
+    container_name: demo-site-b
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run, /tmp]
+    volumes: ["./site:/usr/share/nginx/html:ro"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 5s
+      retries: 2
+    networks: [demo_web]
+networks:
+  demo_web:
+    name: hostops-demo-web
+volumes:
+  history:

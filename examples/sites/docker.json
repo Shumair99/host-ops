@@ -1,0 +1,10 @@
+{
+  "host": { "id": "demo-host", "name": "Demo VPS", "caddy_container": "demo-caddy" },
+  "sites": [{
+    "id": "client-a", "host_id": "demo-host", "name": "Client A",
+    "repository": "example/client-a", "branch": "main",
+    "runtime": { "type": "docker", "container": "demo-site-a", "network": "demo_web", "port": 80 },
+    "proxy": { "domain": "client-a.example.com", "upstream": "demo-site-a:80" },
+    "health": { "path": "/", "public_url": "https://client-a.example.com/", "expected_status": 200, "timeout_seconds": 5 }
+  }]
+}

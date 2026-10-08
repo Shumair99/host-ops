@@ -1,0 +1,177 @@
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/url"
+	"os"
+	"regexp"
+	"time"
+)
+
+type Config struct {
+	Host  Host   `json:"host"`
+	Sites []Site `json:"sites"`
+}
+
+type Host struct {
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	SSH            string  `json:"ssh,omitempty"`
+	IdentityFile   string  `json:"identity_file,omitempty"`
+	CaddyContainer string  `json:"caddy_container,omitempty"`
+	CaddyAdminURL  string  `json:"caddy_admin_url,omitempty"`
+	MonthlyCost    float64 `json:"monthly_cost,omitempty"`
+	Currency       string  `json:"currency,omitempty"`
+}
+
+type Site struct {
+	ID         string   `json:"id"`
+	HostID     string   `json:"host_id"`
+	Name       string   `json:"name"`
+	Repository string   `json:"repository,omitempty"`
+	Branch     string   `json:"branch,omitempty"`
+	Runtime    Runtime  `json:"runtime"`
+	Proxy      Proxy    `json:"proxy"`
+	Health     Health   `json:"health"`
+	Business   Business `json:"business,omitempty"`
+	Recovery   Recovery `json:"recovery,omitempty"`
+}
+
+type Runtime struct {
+	Type          string   `json:"type"`
+	Container     string   `json:"container,omitempty"`
+	Network       string   `json:"network,omitempty"`
+	Port          int      `json:"port,omitempty"`
+	Directory     string   `json:"directory,omitempty"`
+	ExpectedFiles []string `json:"expected_files,omitempty"`
+	Unit          string   `json:"unit,omitempty"`
+}
+
+type Proxy struct {
+	Domain      string   `json:"domain,omitempty"`
+	Upstream    string   `json:"upstream,omitempty"`
+	ExpectedIPs []string `json:"expected_ips,omitempty"`
+}
+
+type Health struct {
+	Path           string `json:"path"`
+	PublicURL      string `json:"public_url,omitempty"`
+	LocalURL       string `json:"local_url,omitempty"`
+	ExpectedStatus int    `json:"expected_status"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+}
+
+type Business struct {
+	Client     string  `json:"client,omitempty"`
+	MonthlyFee float64 `json:"monthly_fee,omitempty"`
+}
+
+type Recovery struct {
+	BackupDirectory string `json:"backup_directory,omitempty"`
+	RTOminutes      int    `json:"rto_target_minutes,omitempty"`
+	RPOhours        int    `json:"rpo_target_hours,omitempty"`
+}
+
+var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
+var sshTarget = regexp.MustCompile(`^([a-zA-Z0-9_.-]+@)?[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
+
+func Load(path string) (Config, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("open manifest: %w", err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(io.LimitReader(file, 1024*1024))
+	decoder.DisallowUnknownFields()
+	var c Config
+	if err = decoder.Decode(&c); err != nil {
+		return c, fmt.Errorf("decode manifest: %w", err)
+	}
+	var extra any
+	if err = decoder.Decode(&extra); err != io.EOF {
+		return c, fmt.Errorf("manifest must contain one JSON object")
+	}
+	return c, c.Validate()
+}
+
+func (c *Config) Validate() error {
+	if !identifier.MatchString(c.Host.ID) {
+		return fmt.Errorf("host.id must be an identifier")
+	}
+	if c.Host.SSH != "" && !sshTarget.MatchString(c.Host.SSH) {
+		return fmt.Errorf("host.ssh must be a host or user@host, without options")
+	}
+	if c.Host.CaddyContainer != "" && !identifier.MatchString(c.Host.CaddyContainer) {
+		return fmt.Errorf("invalid Caddy container")
+	}
+	if c.Host.MonthlyCost < 0 {
+		return fmt.Errorf("host cost cannot be negative")
+	}
+	if len(c.Sites) == 0 {
+		return fmt.Errorf("manifest must register at least one site")
+	}
+	seen := map[string]bool{}
+	for i := range c.Sites {
+		s := &c.Sites[i]
+		if !identifier.MatchString(s.ID) || seen[s.ID] {
+			return fmt.Errorf("invalid or duplicate site id %q", s.ID)
+		}
+		seen[s.ID] = true
+		if s.HostID != c.Host.ID {
+			return fmt.Errorf("site %s host_id must match host.id", s.ID)
+		}
+		if s.Name == "" {
+			return fmt.Errorf("site %s requires a name", s.ID)
+		}
+		if s.Runtime.Type != "docker" {
+			return fmt.Errorf("site %s: this phase supports Docker runtime only", s.ID)
+		}
+		if !identifier.MatchString(s.Runtime.Container) {
+			return fmt.Errorf("site %s: invalid container", s.ID)
+		}
+		if s.Health.ExpectedStatus == 0 {
+			s.Health.ExpectedStatus = 200
+		}
+		if s.Health.TimeoutSeconds == 0 {
+			s.Health.TimeoutSeconds = 5
+		}
+		if s.Health.TimeoutSeconds < 1 || s.Health.TimeoutSeconds > 60 {
+			return fmt.Errorf("site %s: timeout must be 1..60 seconds", s.ID)
+		}
+		if s.Health.ExpectedStatus < 100 || s.Health.ExpectedStatus > 599 {
+			return fmt.Errorf("site %s: invalid expected HTTP status", s.ID)
+		}
+		if s.Health.Path == "" {
+			s.Health.Path = "/"
+		}
+		if s.Health.Path[0] != '/' {
+			return fmt.Errorf("site %s: health path must begin with /", s.ID)
+		}
+		for _, raw := range []string{s.Health.LocalURL, s.Health.PublicURL} {
+			if raw == "" {
+				continue
+			}
+			u, err := url.Parse(raw)
+			if err != nil || u.Hostname() == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.Fragment != "" || u.RawQuery != "" {
+				return fmt.Errorf("site %s: health URLs must be http(s) without credentials, query or fragment", s.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func (s Site) Timeout() time.Duration { return time.Duration(s.Health.TimeoutSeconds) * time.Second }
+
+func (c Config) Select(id string) ([]Site, error) {
+	if id == "" {
+		return c.Sites, nil
+	}
+	for _, s := range c.Sites {
+		if s.ID == id {
+			return []Site{s}, nil
+		}
+	}
+	return nil, fmt.Errorf("site %q is not registered", id)
+}

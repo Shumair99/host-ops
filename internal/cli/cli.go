@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/console"
@@ -18,13 +19,15 @@ import (
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
 	"github.com/Shumair99/host-ops/internal/storage"
+	"github.com/Shumair99/host-ops/internal/tui"
 )
 
-const Help = `Amadeus HostOps — read-only production website operations
+const Help = `Amadeus HostOps - terminal-only production website operations
 
 Usage: hostops <command> [site] [options]
 
 Commands:
+  dashboard         Open the interactive ASCII operations desk (default)
   sites             List registered production properties
   record <kind>     Import deployment/backup/restore/observations (--file FILE)
   status [site]     Inspect runtime health
@@ -55,6 +58,11 @@ Options:
   --db FILE         Local SQLite history (default local/hostops.db)
   --since DURATION  Historical query window (default 24h)
   --file FILE       Evidence JSON; use - for standard input
+  --demo            Offline fictional dashboard; no network access
+  --once            Print one dashboard frame and exit
+  --no-collect      Dashboard reads existing history without collecting
+  --interval VALUE  Dashboard collection interval (default 60s)
+  --page VIEW       Initial dashboard view, e.g. disk or readiness
 
 Exit codes: 0 healthy/list, 1 usage/configuration error, 2 unhealthy or unknown.
 `
@@ -63,12 +71,15 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	return RunWithInput(ctx, args, os.Stdin, out, errOut)
 }
 func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errOut io.Writer) int {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
+	if len(args) > 0 && (args[0] == "help" || args[0] == "--help") {
 		fmt.Fprint(out, Help)
 		return 0
 	}
+	if len(args) == 0 {
+		args = []string{"dashboard"}
+	}
 	command := args[0]
-	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" && command != "security" && command != "orphans" && command != "ownership" && command != "costs" && command != "capacity" && command != "recovery" && command != "impact" && command != "preflight" && command != "capsule" && command != "record" {
+	if command != "sites" && command != "status" && command != "doctor" && command != "metrics" && command != "history" && command != "disk" && command != "events" && command != "deployments" && command != "logs" && command != "diff" && command != "incidents" && command != "readiness" && command != "security" && command != "orphans" && command != "ownership" && command != "costs" && command != "capacity" && command != "recovery" && command != "impact" && command != "preflight" && command != "capsule" && command != "record" && command != "dashboard" {
 		fmt.Fprintf(errOut, "unknown command %q\n", command)
 		return 1
 	}
@@ -77,12 +88,22 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	defaultPath := os.Getenv("HOSTOPS_CONFIG")
 	if defaultPath == "" {
 		defaultPath = "hostops.json"
+		if _, err := os.Stat(defaultPath); os.IsNotExist(err) {
+			if _, err = os.Stat("local/hostops.json"); err == nil {
+				defaultPath = "local/hostops.json"
+			}
+		}
 	}
 	path := flags.String("config", defaultPath, "site manifest")
 	asJSON := flags.Bool("json", false, "JSON output")
 	db := flags.String("db", "local/hostops.db", "history database")
 	since := flags.String("since", "24h", "history window")
 	file := flags.String("file", "", "evidence input file")
+	demo := flags.Bool("demo", false, "offline demo")
+	once := flags.Bool("once", false, "one dashboard frame")
+	noCollect := flags.Bool("no-collect", false, "history only")
+	interval := flags.Duration("interval", 60*time.Second, "dashboard collection interval")
+	page := flags.String("page", "overview", "initial dashboard view")
 	id := ""
 	flagArgs := append([]string(nil), args[1:]...)
 	if len(flagArgs) > 0 && !strings.HasPrefix(flagArgs[0], "-") {
@@ -98,6 +119,27 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 			return 1
 		}
 		id = flags.Arg(0)
+	}
+	if command == "dashboard" {
+		if id != "" {
+			fmt.Fprintln(errOut, "dashboard does not accept a site argument; choose it inside the dashboard")
+			return 1
+		}
+		var c config.Config
+		var err error
+		if !*demo {
+			c, err = config.Load(*path)
+			if err != nil {
+				fmt.Fprintln(errOut, err)
+				return 1
+			}
+		}
+		err = tui.Run(ctx, c, *db, tui.Options{Interval: *interval, Demo: *demo, Once: *once, NoCollect: *noCollect, Page: *page}, input, out)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		return 0
 	}
 	c, err := config.Load(*path)
 	if err != nil {

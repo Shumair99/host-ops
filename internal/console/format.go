@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/Shumair99/host-ops/internal/capacity"
 	"github.com/Shumair99/host-ops/internal/costs"
+	"github.com/Shumair99/host-ops/internal/incidents"
 	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/preflight"
 	"github.com/Shumair99/host-ops/internal/readiness"
@@ -258,6 +259,29 @@ func Format(kind string, value any) []string {
 			add("No recorded evidence yet.")
 		}
 		for _, r := range v {
+			if r.Kind == "incident" {
+				var incident incidents.Incident
+				if json.Unmarshal(r.Data, &incident) == nil {
+					add("[%s] %s | %s", strings.ToUpper(incident.Status), incident.ID, strings.Join(incident.SiteIDs, ", "))
+					add("Started: %s | Source: %s | Dependency: %s", At(incident.StartedAt), incident.Source, incident.Dependency)
+					if incident.ResolvedAt != nil {
+						add("Resolved: %s", At(*incident.ResolvedAt))
+					}
+					for _, diagnosis := range incident.Diagnoses {
+						add("%s (%s confidence)", diagnosis.Finding, diagnosis.Confidence)
+						for _, evidence := range diagnosis.Evidence {
+							add("  Evidence: %s", evidence)
+						}
+						add("  Next: %s", diagnosis.Investigation)
+					}
+					add("Symptoms recorded when the outage opened:")
+					for _, symptom := range incident.Symptoms {
+						add("[%s] %s: %s", strings.ToUpper(string(symptom.State)), symptom.Layer, symptom.Summary)
+					}
+					add("")
+					continue
+				}
+			}
 			add("%s  %s  %s  #%d", At(r.ObservedAt), r.SiteID, r.Kind, r.ID)
 			var data any
 			if json.Unmarshal(r.Data, &data) == nil {

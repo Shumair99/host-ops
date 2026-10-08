@@ -15,6 +15,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
+	"github.com/Shumair99/host-ops/internal/preflight"
 	"github.com/Shumair99/host-ops/internal/readiness"
 	"github.com/Shumair99/host-ops/internal/recovery"
 	"github.com/Shumair99/host-ops/internal/security"
@@ -24,6 +25,15 @@ import (
 func query(ctx context.Context, c config.Config, command, id, db, since string, out, errOut io.Writer) int {
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
+	if command == "impact" {
+		report, err := preflight.Dependency(c, id)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		encoder.Encode(report)
+		return 0
+	}
 	if command == "ownership" {
 		encoder.Encode(security.Ownership(c, id))
 		return 0
@@ -73,6 +83,23 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 		return 1
 	}
 	defer store.Close()
+	if command == "preflight" {
+		reports, err := store.Latest(ctx, c.Host.ID)
+		if err != nil {
+			fmt.Fprintln(errOut, "Preflight evidence unavailable")
+			return 1
+		}
+		report, err := preflight.Assess(ctx, c, id, reports, store, platform.Command{Host: c.Host})
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		encoder.Encode(report)
+		if report.Overall != "healthy" {
+			return 2
+		}
+		return 0
+	}
 	if command == "recovery" {
 		sites, _ := c.Select(id)
 		reports := []recovery.Assessment{}

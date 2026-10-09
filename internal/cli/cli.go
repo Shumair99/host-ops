@@ -69,6 +69,8 @@ Options:
 
   --db FILE         Local SQLite history (default local/hostops.db)
   --since DURATION  Historical query window (default 24h)
+  --history         Read saved metrics without a remote probe (metrics command)
+  --resolution MODE Saved metric detail: auto, raw, 5m, 30m
   --file FILE       Evidence JSON; use - for standard input
   --demo            Offline fictional dashboard; no network access
   --once            Print one dashboard frame and exit
@@ -137,6 +139,8 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	demo := flags.Bool("demo", false, "offline demo")
 	once := flags.Bool("once", false, "one dashboard frame")
 	noCollect := flags.Bool("no-collect", false, "history only")
+	metricHistory := flags.Bool("history", false, "read saved metrics, including older summaries (metrics command)")
+	resolution := flags.String("resolution", "auto", "saved metric detail: auto, raw, 5m, 30m")
 	interval := flags.Duration("interval", 30*time.Second, "public HTTP check interval")
 	page := flags.String("page", "overview", "initial dashboard view")
 	color := flags.String("color", "auto", "terminal color: auto, always, never")
@@ -152,6 +156,10 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	}
 	if *maxAge <= 0 {
 		fmt.Fprintln(errOut, "max-age must be a positive duration")
+		return 1
+	}
+	if *metricHistory && command != "metrics" || *resolution != "auto" && (command != "metrics" || !*metricHistory) {
+		fmt.Fprintln(errOut, "history and resolution apply to metrics --history")
 		return 1
 	}
 	if flags.NArg() > 0 {
@@ -229,6 +237,9 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	}
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
+	if *metricHistory {
+		return metricHistoryExport(ctx, c, id, *db, *since, *resolution, *asJSON, out, errOut)
+	}
 	if command == "record" {
 		if *file == "" {
 			fmt.Fprintln(errOut, "record requires --file FILE (or --file - for stdin)")

@@ -21,8 +21,13 @@ func (s *Store) retentionBlocks(ctx context.Context, pressure bool, policy confi
 		for _, days := range []int{policy.MetricsDays, policy.RetentionDays, policy.EvidenceDays} {
 			args = append(args, now.Add(-time.Duration(days)*24*time.Hour).UTC().Format(timestampLayout))
 		}
+		where += ` OR (s.kind IN ('metrics_5m','host_metrics_5m') AND b.first_at<?) OR (s.kind IN ('metrics_30m','host_metrics_30m') AND b.first_at<?)`
+		minuteDays := min(7, policy.MetricsDays)
+		for _, days := range []int{minuteDays, policy.MetricsDays} {
+			args = append(args, now.Add(-time.Duration(days)*24*time.Hour).UTC().Truncate(30*time.Minute).Format(timestampLayout))
+		}
 	} else {
-		order = `CASE WHEN s.kind IN ('metrics','host_metrics','health','external_health','inventory','snapshot') THEN 0 ELSE 1 END,b.first_at,b.first_id`
+		order = `CASE WHEN s.kind IN ('metrics','host_metrics','metrics_5m','host_metrics_5m','metrics_30m','host_metrics_30m','health','external_health','inventory','snapshot') THEN 0 ELSE 1 END,b.first_at,b.first_id`
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT b.id,b.stream_id,b.first_id,b.last_id,b.first_at,b.last_at,b.samples,b.encoding,s.kind FROM blocks b JOIN streams s ON s.id=b.stream_id `+where+` ORDER BY `+order, args...)
 	if err != nil {
@@ -43,12 +48,18 @@ func (s *Store) retentionBlocks(ctx context.Context, pressure bool, policy confi
 func retentionCutoff(kind string, policy config.History) time.Time {
 	days := policy.EvidenceDays
 	switch kind {
-	case "metrics", "host_metrics":
+	case "metrics", "host_metrics", "metrics_30m", "host_metrics_30m":
 		days = policy.MetricsDays
+	case "metrics_5m", "host_metrics_5m":
+		days = min(7, policy.MetricsDays)
 	case "health", "external_health", "snapshot", "inventory":
 		days = policy.RetentionDays
 	}
-	return time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	if _, _, summary := summaryKind(kind); summary {
+		cutoff = cutoff.UTC().Truncate(30 * time.Minute)
+	}
+	return cutoff
 }
 
 func pruneBlock(ctx context.Context, tx *sql.Tx, b block, cutoff time.Time) (int64, error) {
@@ -65,6 +76,9 @@ func pruneBlock(ctx context.Context, tx *sql.Tx, b block, cutoff time.Time) (int
 	var protected int64
 	if err := tx.QueryRowContext(ctx, `SELECT latest_id FROM streams WHERE id=?`, b.streamID).Scan(&protected); err != nil {
 		return 0, err
+	}
+	if _, _, summary := summaryKind(b.kind); summary {
+		protected = 0
 	}
 	heads := map[int64]bool{protected: true}
 	rows, err := tx.QueryContext(ctx, `SELECT record_id FROM incident_heads WHERE status='open' AND record_id>=? AND record_id<=?`, b.firstID, b.lastID)
@@ -110,12 +124,18 @@ func pruneBlock(ctx context.Context, tx *sql.Tx, b block, cutoff time.Time) (int
 	if _, err = tx.ExecContext(ctx, `DELETE FROM incident_heads WHERE record_id IN (`+placeholders+`)`, removed...); err != nil {
 		return 0, err
 	}
+	err = replaceBlock(ctx, tx, b, retained)
+	return int64(len(removed)), err
+}
+
+func replaceBlock(ctx context.Context, tx *sql.Tx, b block, retained []observation) error {
+	var err error
 	if len(retained) == 0 {
 		if _, err = tx.ExecContext(ctx, `DELETE FROM active_payloads WHERE block_id=?`, b.id); err != nil {
-			return 0, err
+			return err
 		}
 		if _, err = tx.ExecContext(ctx, `DELETE FROM sealed_payloads WHERE block_id=?`, b.id); err != nil {
-			return 0, err
+			return err
 		}
 		_, err = tx.ExecContext(ctx, `DELETE FROM blocks WHERE id=?`, b.id)
 	} else {
@@ -131,11 +151,14 @@ func pruneBlock(ctx context.Context, tx *sql.Tx, b block, cutoff time.Time) (int
 				lastAt = at
 			}
 		}
+		if decodedBytes > maxBlockBytes {
+			return fmt.Errorf("rebuilt history block exceeds decode limit")
+		}
 		data := encodeFrames(retained)
 		if b.encoding == 1 {
 			data, err = packSealedBlock(data)
 			if err != nil {
-				return 0, err
+				return err
 			}
 		}
 		table := "active_payloads"
@@ -143,11 +166,26 @@ func pruneBlock(ctx context.Context, tx *sql.Tx, b block, cutoff time.Time) (int
 			table = "sealed_payloads"
 		}
 		if _, err = tx.ExecContext(ctx, `UPDATE `+table+` SET data=? WHERE block_id=?`, data, b.id); err != nil {
-			return 0, err
+			return err
 		}
-		_, err = tx.ExecContext(ctx, `UPDATE blocks SET first_id=?,last_id=?,first_at=?,last_at=?,samples=?,decoded_bytes=? WHERE id=?`, retained[0].id, retained[len(retained)-1].id, firstAt, lastAt, len(retained), decodedBytes, b.id)
+		encoding := b.encoding
+		if encoding == 2 {
+			encoding = 0
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE blocks SET first_id=?,last_id=?,first_at=?,last_at=?,samples=?,decoded_bytes=?,encoding=? WHERE id=?`, retained[0].id, retained[len(retained)-1].id, firstAt, lastAt, len(retained), decodedBytes, encoding, b.id)
+		if err == nil && b.encoding != 1 {
+			// An expired out-of-order summary can be the insertion head while
+			// younger rows survive. The next frame must delta from the surviving
+			// active tail, not from that removed or modified head.
+			last := retained[len(retained)-1]
+			var packed []byte
+			packed, err = packBlock(last.data)
+			if err == nil {
+				_, err = tx.ExecContext(ctx, `UPDATE streams SET latest_id=?,latest_at=?,latest_data=? WHERE id=?`, last.id, last.at.UTC().Format(timestampLayout), packed, b.streamID)
+			}
+		}
 	}
-	return int64(len(removed)), err
+	return err
 }
 
 func (s *Store) prune(ctx context.Context, policy config.History) error {
@@ -164,6 +202,9 @@ func (s *Store) prune(ctx context.Context, policy config.History) error {
 	if _, err = tx.ExecContext(ctx, `UPDATE history_sequence SET value=value WHERE id=1`); err != nil {
 		return err
 	}
+	if err = rollupMetrics(ctx, tx, policy, time.Now()); err != nil {
+		return err
+	}
 	for _, b := range blocks {
 		if _, err = pruneBlock(ctx, tx, b, retentionCutoff(b.kind, policy)); err != nil {
 			return err
@@ -173,6 +214,9 @@ func (s *Store) prune(ctx context.Context, policy config.History) error {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `DELETE FROM leases WHERE expires_at<?`, time.Now().UnixNano()); err != nil {
+		return err
+	}
+	if err = compactMetricActives(ctx, tx); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {

@@ -437,6 +437,9 @@ func TestFullDayLosslessStorageComparison(t *testing.T) {
 		t.Run(fmt.Sprint(changing), func(t *testing.T) {
 			s := auditStore(t)
 			ctx := context.Background()
+			if err := s.Prune(ctx, config.History{MetricDetail: "full"}); err != nil {
+				t.Fatal(err)
+			}
 			legacy, err := sql.Open("sqlite", ":memory:")
 			if err != nil {
 				t.Fatal(err)

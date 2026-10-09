@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 var migrations = []string{
 	`CREATE TABLE IF NOT EXISTS records (id INTEGER PRIMARY KEY, host_id TEXT NOT NULL, site_id TEXT NOT NULL, kind TEXT NOT NULL, observed_at TEXT NOT NULL, data TEXT NOT NULL);
@@ -21,6 +21,10 @@ CREATE TABLE IF NOT EXISTS history_imports (host_id TEXT NOT NULL, site_id TEXT 
 	`ALTER TABLE dedup ADD COLUMN observed_at TEXT NOT NULL DEFAULT '';
 ALTER TABLE dedup ADD COLUMN record_id INTEGER;`,
 	compactSchema,
+	// Version 5 permits larger independent blocks and typed metric summaries.
+	// Existing version 4 frames remain readable without rewriting their data.
+	`DROP INDEX blocks_active;
+CREATE UNIQUE INDEX blocks_active ON blocks(stream_id) WHERE encoding IN (0,2);`,
 }
 
 func migrate(db *sql.DB) error {

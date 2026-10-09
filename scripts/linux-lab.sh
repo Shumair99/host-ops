@@ -25,3 +25,5 @@ done
   -fuzz '^FuzzProxyConfigurationParsers$' -fuzztime 10s -parallel 2
 "$engine" exec "$container" go test ./internal/storage -run '^$' \
   -fuzz '^FuzzBlockDecoder$' -fuzztime 10s -parallel 2
+"$engine" exec "$container" go test ./internal/storage -run '^$' \
+  -fuzz '^FuzzMetricWindowDecoder$' -fuzztime 10s -parallel 2

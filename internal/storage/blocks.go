@@ -66,6 +66,17 @@ func insertObservation(ctx context.Context, tx *sql.Tx, host, site, kind string,
 	if len(data) > maxBlockBytes-128 {
 		return 0, fmt.Errorf("history record exceeds %d-byte decode limit", maxBlockBytes-128)
 	}
+	if existingID == 0 && (kind == "metrics" || kind == "host_metrics") && at.Before(time.Now().Add(-24*time.Hour)) {
+		for _, seconds := range []int{300, 1800} {
+			_, _, index, err := summaryAt(ctx, tx, host, site, summaryName(kind, seconds), at.UTC().Truncate(time.Duration(seconds)*time.Second))
+			if err != nil {
+				return 0, err
+			}
+			if index >= 0 {
+				return 0, fmt.Errorf("metric window already summarized; individual imports into closed windows are unsupported")
+			}
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO streams(host_id,site_id,kind) VALUES(?,?,?) ON CONFLICT(host_id,site_id,kind) DO NOTHING`, host, site, kind); err != nil {
 		return 0, err
 	}
@@ -83,12 +94,29 @@ func insertObservation(ctx context.Context, tx *sql.Tx, host, site, kind string,
 	}
 	var b block
 	var rawBytes, decodedBytes int
-	err := tx.QueryRowContext(ctx, `SELECT b.id,b.first_id,b.last_id,b.first_at,b.last_at,b.samples,length(a.data),b.decoded_bytes FROM blocks b JOIN active_payloads a ON a.block_id=b.id WHERE b.stream_id=? AND b.encoding=0`, streamID).Scan(&b.id, &b.firstID, &b.lastID, &b.firstAt, &b.lastAt, &b.count, &rawBytes, &decodedBytes)
+	err := tx.QueryRowContext(ctx, `SELECT b.id,b.first_id,b.last_id,b.first_at,b.last_at,b.samples,b.encoding,length(a.data),b.decoded_bytes FROM blocks b JOIN active_payloads a ON a.block_id=b.id WHERE b.stream_id=? AND b.encoding IN (0,2)`, streamID).Scan(&b.id, &b.firstID, &b.lastID, &b.firstAt, &b.lastAt, &b.count, &b.encoding, &rawBytes, &decodedBytes)
 	if err != nil && err != sql.ErrNoRows {
 		return 0, err
 	}
 	previous := observation{at: time.Unix(0, 0)}
 	if err == nil {
+		if b.encoding == 2 {
+			if err = loadPayload(ctx, tx, &b); err != nil {
+				return 0, err
+			}
+			raw, decodeErr := unpackBlock(b.data, 2)
+			if decodeErr != nil {
+				return 0, decodeErr
+			}
+			rawBytes = len(raw)
+			if _, err = tx.ExecContext(ctx, `UPDATE active_payloads SET data=? WHERE block_id=?`, raw, b.id); err != nil {
+				return 0, err
+			}
+			if _, err = tx.ExecContext(ctx, `UPDATE blocks SET encoding=0 WHERE id=?`, b.id); err != nil {
+				return 0, err
+			}
+			b.encoding = 0
+		}
 		previousData, err = unpackBlock(previousData, 1)
 		if err != nil {
 			return 0, err
@@ -187,15 +215,21 @@ func sealBlock(ctx context.Context, tx *sql.Tx, id int64) error {
 // queryBlocks narrows by stream/time before decompressing. ID bounds let a
 // limited query stop without reading the rest of a multi-day history.
 func (s *Store) queryBlocks(ctx context.Context, host, site, kind string, since time.Time, limit int, exactSite, oldest bool) ([]Record, error) {
-	order := "b.last_id DESC"
-	if oldest {
-		order = "b.first_at,b.first_id"
-	}
 	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
+	return queryBlocksTx(ctx, tx, host, site, kind, since, limit, exactSite, oldest, false)
+}
+
+func queryBlocksTx(ctx context.Context, tx *sql.Tx, host, site, kind string, since time.Time, limit int, exactSite, oldest, byTime bool) ([]Record, error) {
+	order := "b.last_id DESC"
+	if oldest {
+		order = "b.first_at,b.first_id"
+	} else if byTime {
+		order = "b.last_at DESC,b.last_id DESC"
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT b.id,b.stream_id,b.first_id,b.last_id,b.first_at,b.last_at,b.samples,b.encoding,s.host_id,s.site_id,s.kind
  FROM blocks b JOIN streams s ON s.id=b.stream_id WHERE s.host_id=? AND (?=0 OR s.site_id=?) AND (?='' OR s.kind=?) AND b.last_at>=? ORDER BY `+order,
 		host, exactSite || site != "", site, kind, kind, since.UTC().Format(timestampLayout))
@@ -210,7 +244,7 @@ func (s *Store) queryBlocks(ctx context.Context, host, site, kind string, since 
 			rows.Close()
 			return nil, err
 		}
-		if len(result) >= limit && ((!oldest && b.lastID < result[limit-1].ID) || (oldest && b.firstAt > result[limit-1].ObservedAt.UTC().Format(timestampLayout))) {
+		if len(result) >= limit && ((!oldest && !byTime && b.lastID < result[limit-1].ID) || (!oldest && byTime && b.lastAt < result[limit-1].ObservedAt.UTC().Format(timestampLayout)) || (oldest && b.firstAt > result[limit-1].ObservedAt.UTC().Format(timestampLayout))) {
 			break
 		}
 		if err = loadPayload(ctx, tx, &b); err != nil {
@@ -226,6 +260,9 @@ func (s *Store) queryBlocks(ctx context.Context, host, site, kind string, since 
 			}
 		}
 		sort.Slice(result, func(i, j int) bool {
+			if byTime && !result[i].ObservedAt.Equal(result[j].ObservedAt) {
+				return result[i].ObservedAt.After(result[j].ObservedAt)
+			}
 			if !oldest {
 				return result[i].ID > result[j].ID
 			}

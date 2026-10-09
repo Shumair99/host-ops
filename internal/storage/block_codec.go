@@ -16,7 +16,7 @@ import (
 // Blocks are independent: losing one never makes the next undecodable. JSON
 // byte deltas preserve numbers, omitted fields and nulls exactly as written.
 const (
-	blockSamples     = 128
+	blockSamples     = 512
 	blockTargetBytes = 256 * 1024
 	maxBlockBytes    = 16 * 1024 * 1024
 )
@@ -316,7 +316,7 @@ func unpackBlock(data []byte, encoding int) ([]byte, error) {
 		}
 		return data, nil
 	}
-	if encoding != 1 {
+	if encoding != 1 && encoding != 2 {
 		return nil, fmt.Errorf("unsupported history block encoding %d", encoding)
 	}
 	p, _ := unpackers.Get().(*blockUnpacker)

@@ -14,14 +14,37 @@ import (
 )
 
 func benchmarkSamples() []observation {
+	return benchmarkSampleCount(128)
+}
+
+func benchmarkSampleCount(count int) []observation {
 	var samples []observation
 	start := time.Date(2026, 10, 9, 0, 0, 0, 0, time.UTC)
-	for i := 0; i < 128; i++ {
+	for i := 0; i < count; i++ {
 		at := start.Add(time.Duration(i)*30*time.Second + time.Duration(i*7919)*time.Nanosecond)
 		data, _ := json.Marshal(metrics.Sample{HostID: "h", SiteID: "s", ObservedAt: at, Values: map[string]float64{"cpu_percent": 5 + 4*math.Sin(float64(i)*0.17), "memory_used_bytes": float64(100000000 + (i*7919)%5000*4096)}, Unavailable: []string{}})
 		samples = append(samples, observation{id: int64(i + 1), at: at, data: data})
 	}
 	return samples
+}
+
+func BenchmarkBlockSizes(b *testing.B) {
+	for _, count := range []int{128, 256, 512} {
+		b.Run(fmt.Sprint(count), func(b *testing.B) {
+			raw := encodeFrames(benchmarkSampleCount(count))
+			b.ReportAllocs()
+			b.ResetTimer()
+			var packed []byte
+			for i := 0; i < b.N; i++ {
+				var err error
+				packed, err = packSealedBlock(raw)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportMetric(float64(len(packed))/float64(count), "bytes/sample")
+		})
+	}
 }
 
 func BenchmarkBlockCompressionLevels(b *testing.B) {

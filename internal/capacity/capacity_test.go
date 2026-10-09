@@ -36,6 +36,13 @@ func TestForecastUsesOldestObservationBeyondRecentQueryLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err = db.Prune(ctx, config.History{}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := db.OldestMetricPoint(ctx, "h", "host_metrics", now.Add(-30*24*time.Hour))
+	if err != nil || first == nil || first.ResolutionSeconds != 300 {
+		t.Fatal("fixture did not exercise a summarized disk endpoint", first, err)
+	}
 	r, err := Assess(ctx, config.Config{Host: config.Host{ID: "h"}}, db)
 	if err != nil || r.DiskGrowthBytesPerDay == nil || r.DaysTo85 == nil || r.CPU95 == nil || *r.CPU95 != 10 || r.Samples != 1000 {
 		t.Fatal("oldest disk observation was lost or contaminated recent percentiles", err, r)

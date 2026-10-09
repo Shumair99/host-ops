@@ -101,16 +101,19 @@ func Assess(ctx context.Context, c config.Config, store *storage.Store) (Report,
 		}
 	}
 	r := Evaluate(c.Host.ID, samples, now)
-	r.Notes = append(r.Notes, "CPU/RAM percentiles use the latest 1,000 samples. Disk growth compares the first and latest observations within 30 days.")
-	first, err := store.Oldest(ctx, c.Host.ID, "", "host_metrics", since)
+	r.Notes = append(r.Notes, "CPU/RAM percentiles use the latest 1,000 individual readings; averages in older summaries are excluded. Disk growth compares measured endpoints within retained history up to 30 days.")
+	first, err := store.OldestMetricPoint(ctx, c.Host.ID, "host_metrics", since)
 	if err != nil {
 		return Report{}, err
 	}
 	if first != nil && len(samples) > 0 {
-		var earliest metrics.Sample
-		if json.Unmarshal(first.Data, &earliest) == nil {
+		if used, ok := first.Values["disk_used_bytes"]; ok && !used.FirstAt.Before(since) {
+			earliest := metrics.Sample{HostID: c.Host.ID, ObservedAt: used.FirstAt, Values: map[string]float64{"disk_used_bytes": used.First}}
 			growth := Evaluate(c.Host.ID, []metrics.Sample{earliest, samples[len(samples)-1]}, now)
 			r.DiskGrowthBytesPerDay, r.DaysTo85 = growth.DiskGrowthBytesPerDay, growth.DaysTo85
+			if first.ResolutionSeconds > 0 {
+				r.Notes = append(r.Notes, "The older disk endpoint is an actual reading preserved in a summary, not the window average.")
+			}
 		}
 	}
 	return r, nil

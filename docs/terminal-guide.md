@@ -3,14 +3,14 @@
 ## Start here in PowerShell
 
 ```powershell
-cd C:\path\to\host-ops
+cd path\to\host-ops
 .\bin\hostops.exe dashboard --demo
 ```
 
 CMD works too:
 
 ```bat
-cd /d C:\path\to\host-ops
+cd /d path\to\host-ops
 bin\hostops.exe dashboard --demo
 ```
 

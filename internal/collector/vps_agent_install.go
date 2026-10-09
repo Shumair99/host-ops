@@ -75,17 +75,16 @@ func vpsAgentBinary(architecture, override string) ([]byte, error) {
 		_ = f.Close()
 		return nil, fmt.Errorf("matching Linux VPS collector changed while opening")
 	}
-	data, err := io.ReadAll(io.LimitReader(f, 50_000_001))
+	data, err := io.ReadAll(io.LimitReader(f, maxCollectorBytes+1))
 	closeErr := f.Close()
 	if err == nil {
 		err = closeErr
 	}
-	if err != nil || len(data) < 100_000 || len(data) > 50_000_000 || string(data[:4]) != "\x7fELF" || data[4] != 2 || data[5] != 1 {
+	if err != nil || len(data) < 100_000 || int64(len(data)) > maxCollectorBytes {
 		return nil, fmt.Errorf("matching Linux VPS collector is missing or invalid; build the HostOps release bundle")
 	}
-	machine := int(data[18]) | int(data[19])<<8
-	if architecture == "amd64" && machine != 62 || architecture == "arm64" && machine != 183 {
-		return nil, fmt.Errorf("VPS collector architecture does not match the connected server")
+	if err := validateLinuxExecutable(data, architecture); err != nil {
+		return nil, fmt.Errorf("VPS collector executable is invalid: %w", err)
 	}
 	return data, nil
 }

@@ -8,14 +8,14 @@ The dashboard uses your local account and existing SSH credentials. Collection l
 
 ## Try the offline demonstration
 
-Build first with Go 1.27.2+: run `.\scripts\check.ps1` on Windows. On Linux/macOS run `go build -trimpath -o bin/hostops ./cmd/hostops`, then `bin/hostops dashboard --demo`. Remote connections also need the bundled Linux collectors. The Windows binaries are built under `bin/`. Open PowerShell:
+Build first with Go 1.27.2+: run `.\scripts\check.ps1` on Windows. On Linux/macOS run `go build -trimpath -o bin/hostops ./cmd/hostops`, then `bin/hostops dashboard --demo`. Remote connections also need the Linux collector and optional VPS agent binaries; `scripts/build-bundles.sh` creates complete workstation bundles. The Windows binaries are built under `bin/`. Open PowerShell:
 
 ```powershell
-cd C:\path\to\host-ops
+cd path\to\host-ops
 .\bin\hostops.exe dashboard --demo
 ```
 
-In CMD, use `cd /d C:\path\to\host-ops` and `bin\hostops.exe dashboard --demo`. The demo needs no manifest, SSH, Docker, internet connection or token. It uses fictional sites in an isolated in-memory database. Press `s` for Sites, choose with arrows and press Enter. Press `t` to simulate an outage, `n` to inspect the incident, and `t` again to simulate recovery. Press `d` for illustrative disk accounting and `q` to exit.
+In CMD, use `cd /d path\to\host-ops` and `bin\hostops.exe dashboard --demo`. The demo needs no manifest, SSH, Docker, internet connection or token. It uses fictional sites in an isolated in-memory database. Press `s` for Sites, choose with arrows and press Enter. Press `t` to simulate an outage, `n` to inspect the incident, and `t` again to simulate recovery. Press `d` for illustrative disk accounting and `q` to exit.
 
 ## Connect a VPS
 
@@ -36,13 +36,7 @@ The older two-step workflow remains available:
 .\bin\hostops.exe dashboard
 ```
 
-Use `--identity C:/path/to/key` or `--port 2222` when needed; SSH aliases and existing SSH configuration also work. No private key contents are copied into settings. On this workspace, the existing connection is ready:
-
-```powershell
-.\bin\hostops.exe dashboard --config local/hostops.json
-```
-
-Running `hostops` without a command also opens the dashboard. One persistent SSH collector supplies live metrics and inventory while public checks run independently from your computer. The public HTTP interval defaults to 30 seconds; DNS/TLS checks run every five minutes. `scripts/dev.ps1` opens the live dashboard, and `scripts/dev.ps1 -Demo` opens the offline demo.
+Use `--identity C:/path/to/key` or `--port 2222` when needed; SSH aliases and existing SSH configuration also work. No private key contents are copied into settings. For later sessions, run `hostops dashboard --config local/hostops.json`. Running `hostops` without a command also opens the dashboard. One persistent SSH collector supplies live metrics and inventory while public checks run independently from your computer. The public HTTP interval defaults to 30 seconds; DNS/TLS checks run every five minutes.
 
 Use a terminal at least 60 columns by 16 rows; 120 by 36 or larger shows more evidence. Up/Down in the menu previews each view immediately; Right or Enter focuses content. Left returns to the menu, and Tab switches pane focus. Sites combines a workload list with selected-property details; Enter opens the full inspector. Timeline and recent activity combine transitions, changes, deployments and incidents. A missing or old storage index is inspected automatically in the background and cached for 30 minutes. Disk's directory navigation uses that cache; Space requests another bounded scan. See [automatic storage inspection](docs/storage.md) for controls, ownership and measured overhead.
 
@@ -65,12 +59,16 @@ Readers cover Docker, Podman, systemd/listeners, Caddy, Nginx, Traefik and expli
 
 Active configuration takes authority over declared configuration for the same proxy. Nginx/Apache dumps and Traefik labels are labelled declared; wildcard domains and catch-all rules are coverage patterns, not invented websites. Unsupported proxies, restricted permissions and opaque dynamic routing remain gaps. This release does not claim universal VPS coverage. See the [discovery architecture, support matrix and migration guide](docs/discovery.md).
 
-## Build and development
+## Build and security
 
-Building requires Go 1.27.2 or newer; the module pins that patched toolchain. On Windows, `scripts/check.ps1` runs tests, vet, builds the three Windows executables and cross-compiles both Linux collector architectures. See [security boundaries](docs/security.md), and the optional [isolated Docker lab](demo/README.md).
+Building requires Go 1.27.2 or newer. On Windows, `scripts/check.ps1` runs tests and vet, builds the Windows executables, and cross-compiles the Linux collector and optional history service. On Linux/macOS, use `go build ./cmd/...` for local binaries or `bash scripts/build-bundles.sh` for distributable archives. See the [offline and isolated demos](demo/README.md) and [security boundaries](docs/security.md).
 
-Readiness, recovery, security/exposure, cost allocation, capacity, preflight, dependency impact, deployment records and incident capsules remain available through the terminal. Evidence enters through `hostops record`, described in the [deployment](docs/deployments.md), [recovery](docs/recovery.md) and [watcher](docs/watcher.md) guides. HostOps does not execute repairs, maintenance or restores.
+Readiness, recovery, security/exposure, cost allocation, capacity, preflight, dependency impact, deployment records and incident capsules are available through the terminal. `hostops record` imports evidence; see the [deployment](docs/deployments.md), [recovery](docs/recovery.md) and [watcher](docs/watcher.md) guides. HostOps does not execute repairs, maintenance or restores.
 
-Machine-specific manifests, history and inspection evidence belong in ignored `local/`. Keep credentials, private keys, environment values and raw runtime dumps out of Git.
+Local history has [configurable retention and a 256 MiB default database budget](docs/history.md). Machine-specific manifests and history belong in ignored `local/`; keep credentials, private keys, environment values and raw runtime dumps out of Git. On Windows, a shared workspace directory may be refused if its ACL allows other accounts to read it. Choose a private database path with `--db`, for example:
 
-Local history has [configurable retention and a 256 MiB default database budget](docs/history.md). Windows history folders receive private ACLs. The project uses the [MIT license](LICENSE); see [security reporting](SECURITY.md). CI and bundle workflows are prepared for future publication; no public release is implied by a local build.
+```powershell
+.\bin\hostops.exe dashboard --config local/hostops.json --db "$env:LOCALAPPDATA\HostOps\history.db"
+```
+
+The project uses the [MIT license](LICENSE). Report security issues using [SECURITY.md](SECURITY.md).

@@ -36,7 +36,11 @@ func protectHistory(path string, created bool) error {
 			return err
 		}
 		if !privateACL(sd.String(), sid) {
-			return fmt.Errorf("history directory grants access to other users; choose a new dedicated private directory")
+			if cacheDir, cacheErr := os.UserCacheDir(); cacheErr == nil && cacheDir != "" {
+				privatePath := filepath.Join(cacheDir, "HostOps", "history.db")
+				return fmt.Errorf("history directory grants access to other users; choose a private database path with --db, for example %s", privatePath)
+			}
+			return fmt.Errorf("history directory grants access to other users; choose a private directory and pass its database path with --db")
 		}
 		if err = setPrivateACL(dir, sid); err != nil {
 			return fmt.Errorf("protect history directory: %w", err)

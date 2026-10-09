@@ -36,3 +36,19 @@ func TestConsoleTextCannotInjectTerminalEscapes(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatJSONMetricsGolden(t *testing.T) {
+	got := strings.Join(FormatJSON("metrics", []byte(`{"host_id":"node-1","values":{"cpu_percent":25}}`)), "\n")
+	want := strings.Join([]string{
+		"HOST node-1  |  Observed unobserved",
+		"CPU    [#####---------------]  25.0%",
+		"RAM    [????????????????????] UNKNOWN",
+		"DISK   [????????????????????] UNKNOWN",
+	}, "\n")
+	if got != want {
+		t.Fatalf("metric output changed:\n got: %q\nwant: %q", got, want)
+	}
+	if got := FormatJSON("metrics", []byte("{")); len(got) != 1 || got[0] != "Evidence could not be rendered." {
+		t.Fatalf("invalid metric JSON was not handled safely: %q", got)
+	}
+}

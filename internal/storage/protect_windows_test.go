@@ -6,6 +6,7 @@ import (
 	"golang.org/x/sys/windows"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -65,6 +66,8 @@ func TestWindowsRefusesSharedCustomHistoryDirectory(t *testing.T) {
 			if s, err := Open(filepath.Join(dir, "history.db")); err == nil {
 				s.Close()
 				t.Fatal("shared custom directory accepted")
+			} else if !strings.Contains(err.Error(), "--db") {
+				t.Fatalf("refusal did not explain how to choose a private history path: %v", err)
 			}
 			after, err := windows.GetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 			if err != nil || after.String() != before.String() {

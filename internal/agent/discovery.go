@@ -458,6 +458,8 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 				launch()
 			case "host_metrics":
 				if frame.source == "collector" && c.Host.HistoryMode == "continuous" {
+					// The collector is asked to suppress this stream in continuous
+					// mode; retain this guard in case an older collector sends it anyway.
 					continue
 				}
 				if message.Sample == nil || message.Sample.HostID != c.Host.ID {

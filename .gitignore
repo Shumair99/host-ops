@@ -10,3 +10,38 @@ local/
 coverage.out
 output/
 .playwright-cli/
+
+# Local connection settings, credentials and operational exports
+/hostops.json
+/.ssh/
+*.pem
+*.key
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3-shm
+*.sqlite3-wal
+/exports/
+/capsules/
+
+# Private agent context and development review notes
+/.agents/
+/.codex/
+/.impeccable.md
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+*AUDIT*.md
+*-audit*.md
+*-review*.md
+*CONTEXT*.md
+/audits/
+/reviews/
+/context/
+
+# Temporary recordings and terminal/browser previews
+/screenshots/
+/captures/
+*-preview/
+codex-clipboard-*

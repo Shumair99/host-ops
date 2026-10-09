@@ -49,9 +49,7 @@ func TestVPSAgentBinaryMustMatchTargetArchitecture(t *testing.T) {
 		wantErr bool
 	}{{"amd64", 62, false}, {"arm64", 183, false}, {"arm64", 62, true}} {
 		path := filepath.Join(t.TempDir(), "agent")
-		data := make([]byte, 100_001)
-		copy(data, []byte{0x7f, 'E', 'L', 'F', 2, 1})
-		data[18] = tc.machine
+		data := testExecutableELF(uint16(tc.machine), 100_001)
 		if err := os.WriteFile(path, data, 0600); err != nil {
 			t.Fatal(err)
 		}

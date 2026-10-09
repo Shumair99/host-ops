@@ -2,6 +2,7 @@ package deployments
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"time"
 )
@@ -39,7 +40,7 @@ func (d Deployment) Validate() error {
 	if d.Branch != "" && !branch.MatchString(d.Branch) {
 		return fmt.Errorf("invalid branch")
 	}
-	if d.DurationSeconds < 0 || d.DurationSeconds > 86400 {
+	if math.IsNaN(d.DurationSeconds) || d.DurationSeconds < 0 || d.DurationSeconds > 86400 {
 		return fmt.Errorf("duration must be 0..86400 seconds")
 	}
 	if d.HealthResult != "unknown" && d.HealthResult != "healthy" && d.HealthResult != "unhealthy" {

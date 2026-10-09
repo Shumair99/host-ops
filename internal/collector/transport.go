@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"debug/elf"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -34,6 +35,8 @@ type Session struct {
 	once       sync.Once
 	persistent bool
 }
+
+const maxCollectorBytes = 50_000_000
 
 func sshArgs(h config.Host) []string {
 	args := []string{"-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2"}
@@ -68,19 +71,15 @@ func Bootstrap(ctx context.Context, c config.Config) (string, error) {
 	}
 	file := c.Discovery.CollectorFile
 	if file == "" {
-		exe, _ := os.Executable()
+		exe, err := os.Executable()
+		if err != nil {
+			return "", fmt.Errorf("cannot locate the HostOps release bundle")
+		}
 		file = filepath.Join(filepath.Dir(exe), "collectors", "linux-"+arch, "hostops")
 	}
-	binary, err := os.ReadFile(file)
+	binary, err := readCollectorBinary(file, arch)
 	if err != nil {
-		return "", fmt.Errorf("Linux collector missing: build the release bundle or set discovery.collector_file")
-	}
-	if len(binary) < 20 || string(binary[:4]) != "\x7fELF" {
-		return "", fmt.Errorf("collector file must be a Linux executable")
-	}
-	machine := int(binary[18]) | int(binary[19])<<8
-	if binary[5] != 1 || arch == "amd64" && machine != 62 || arch == "arm64" && machine != 183 {
-		return "", fmt.Errorf("collector executable does not match the VPS architecture")
+		return "", err
 	}
 	sum := sha256.Sum256(binary)
 	hash := hex.EncodeToString(sum[:])
@@ -101,9 +100,82 @@ func Bootstrap(ctx context.Context, c config.Config) (string, error) {
 	return remote, nil
 }
 
+func readCollectorBinary(file, arch string) ([]byte, error) {
+	info, err := os.Lstat(file)
+	if err != nil {
+		return nil, fmt.Errorf("Linux collector missing: build the release bundle or set discovery.collector_file")
+	}
+	if !info.Mode().IsRegular() || info.Size() < 64 || info.Size() > maxCollectorBytes {
+		return nil, fmt.Errorf("collector file must be a regular Linux executable no larger than 50 MB")
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open Linux collector")
+	}
+	opened, statErr := f.Stat()
+	if statErr != nil || !os.SameFile(info, opened) {
+		_ = f.Close()
+		return nil, fmt.Errorf("collector file changed while opening")
+	}
+	binary, readErr := io.ReadAll(io.LimitReader(f, maxCollectorBytes+1))
+	closeErr := f.Close()
+	if readErr == nil {
+		readErr = closeErr
+	}
+	if readErr != nil {
+		return nil, fmt.Errorf("cannot read Linux collector")
+	}
+	if len(binary) < 64 || int64(len(binary)) > maxCollectorBytes {
+		return nil, fmt.Errorf("collector file must be a regular Linux executable no larger than 50 MB")
+	}
+	if err := validateLinuxExecutable(binary, arch); err != nil {
+		return nil, err
+	}
+	return binary, nil
+}
+
+func validateLinuxExecutable(data []byte, arch string) error {
+	executable, err := elf.NewFile(bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("collector file is not a valid Linux executable")
+	}
+	defer executable.Close()
+	if executable.Class != elf.ELFCLASS64 || executable.Data != elf.ELFDATA2LSB || (executable.Type != elf.ET_EXEC && executable.Type != elf.ET_DYN) {
+		return fmt.Errorf("collector file must be a 64-bit little-endian Linux executable")
+	}
+	var machine elf.Machine
+	switch arch {
+	case "amd64":
+		machine = elf.EM_X86_64
+	case "arm64":
+		machine = elf.EM_AARCH64
+	default:
+		return fmt.Errorf("collector architecture is not supported")
+	}
+	if executable.Machine != machine {
+		return fmt.Errorf("collector executable does not match the VPS architecture")
+	}
+	if executable.Entry == 0 {
+		return fmt.Errorf("collector executable has no entry point")
+	}
+	entryMapped := false
+	for _, program := range executable.Progs {
+		if program.Type == elf.PT_LOAD && program.Flags&elf.PF_X != 0 && executable.Entry >= program.Vaddr && executable.Entry-program.Vaddr < program.Memsz {
+			entryMapped = true
+			break
+		}
+	}
+	if !entryMapped {
+		return fmt.Errorf("collector entry point is not in an executable segment")
+	}
+	return nil
+}
+
 func uploadCommand(hash string) string {
 	name := "collector-" + hash
-	return `umask 077; taskCache="${XDG_CACHE_HOME:-$HOME/.cache}/hostops"; test ! -L "$taskCache" && mkdir -p "$taskCache" && chmod 700 "$taskCache" || exit 1; taskTmp="$taskCache/` + name + `.upload-$$"; trap 'rm -f -- "$taskTmp"' EXIT; cat > "$taskTmp" && printf '%s  %s\n' '` + hash + `' "$taskTmp" | sha256sum -c - >/dev/null && chmod 700 "$taskTmp" && mv -- "$taskTmp" "$taskCache/` + name + `" && printf '%s' "$taskCache/` + name + `"`
+	// Keep recent versions during the upload/start handoff so another HostOps
+	// process cannot remove a binary that it has uploaded but not launched yet.
+	return `umask 077; taskCache="${XDG_CACHE_HOME:-$HOME/.cache}/hostops"; test ! -L "$taskCache" && mkdir -p "$taskCache" && chmod 700 "$taskCache" || exit 1; taskTmp="$taskCache/` + name + `.upload-$$"; trap 'rm -f -- "$taskTmp"' EXIT; cat > "$taskTmp" && printf '%s  %s\n' '` + hash + `' "$taskTmp" | sha256sum -c - >/dev/null && chmod 700 "$taskTmp" && mv -- "$taskTmp" "$taskCache/` + name + `" && { find "$taskCache" -maxdepth 1 -type f -regextype posix-extended -regex '.*/collector-[0-9a-f]{64}' ! -name '` + name + `' -mmin +60 -delete 2>/dev/null || :; } && printf '%s' "$taskCache/` + name + `"`
 }
 
 type limitedWriter struct{ data []byte }

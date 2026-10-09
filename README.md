@@ -8,7 +8,7 @@ The dashboard uses your local account and existing SSH credentials. Collection l
 
 ## Try the offline demonstration
 
-Build first with Go 1.26+: run `.\scripts\check.ps1` on Windows. On Linux/macOS run `go build -trimpath -o bin/hostops ./cmd/hostops`, then `bin/hostops dashboard --demo`. Remote connections also need the bundled Linux collectors. The Windows binaries are built under `bin/`. Open PowerShell:
+Build first with Go 1.27.2+: run `.\scripts\check.ps1` on Windows. On Linux/macOS run `go build -trimpath -o bin/hostops ./cmd/hostops`, then `bin/hostops dashboard --demo`. Remote connections also need the bundled Linux collectors. The Windows binaries are built under `bin/`. Open PowerShell:
 
 ```powershell
 cd C:\path\to\host-ops
@@ -25,7 +25,7 @@ Build or obtain the full bundle, including the Linux discovery collectors and op
 .\bin\hostops.exe start user@vps
 ```
 
-The first run discovers supported routes, saves ignored settings to `local/hostops.json`, then asks whether to enable the optional rolling history service. It retains at most 30 minutes of host metrics and opens no public port. Installation uses `sudo` over the SSH terminal for a non-root account; a direct root SSH login already has the required authorization. HostOps does not save any password. Automated SSH password login is not supported: configure an identity through your SSH agent/config or pass `--identity C:/path/to/key`. Use `--port 2222` for a non-default SSH port.
+The first run discovers supported routes, saves ignored settings to `local/hostops.json`, then asks whether to enable the optional rolling history service. Pressing Enter keeps it disabled; installation requires an explicit Yes. It retains at most 30 minutes of host metrics and opens no public port. Installation uses `sudo` over the SSH terminal for a non-root account; a direct root SSH login already has the required authorization. HostOps does not save any password. Automated SSH password login is not supported: configure an identity through your SSH agent/config or pass `--identity C:/path/to/key`. Use `--port 2222` for a non-default SSH port.
 
 The service runs on Linux amd64/arm64 with systemd. It uses a dedicated no-login `hostops` account, has no Linux capabilities, and grants the configured SSH account access only to the local telemetry socket and small history file. It does not scan site files or read file contents. Manage it later with `hostops agent status`, `hostops agent install`, or `hostops agent uninstall`.
 
@@ -67,7 +67,7 @@ Active configuration takes authority over declared configuration for the same pr
 
 ## Build and development
 
-Building requires Go 1.26 or newer. On Windows, `scripts/check.ps1` runs tests, vet, builds the three Windows executables and cross-compiles both Linux collector architectures. See [security boundaries](docs/security.md), and the optional [isolated Docker lab](demo/README.md).
+Building requires Go 1.27.2 or newer; the module pins that patched toolchain. On Windows, `scripts/check.ps1` runs tests, vet, builds the three Windows executables and cross-compiles both Linux collector architectures. See [security boundaries](docs/security.md), and the optional [isolated Docker lab](demo/README.md).
 
 Readiness, recovery, security/exposure, cost allocation, capacity, preflight, dependency impact, deployment records and incident capsules remain available through the terminal. Evidence enters through `hostops record`, described in the [deployment](docs/deployments.md), [recovery](docs/recovery.md) and [watcher](docs/watcher.md) guides. HostOps does not execute repairs, maintenance or restores.
 

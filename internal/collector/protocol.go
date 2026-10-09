@@ -17,8 +17,9 @@ import (
 )
 
 type Request struct {
-	Version int         `json:"version"`
-	Host    config.Host `json:"host"`
+	Version         int         `json:"version"`
+	Host            config.Host `json:"host"`
+	SkipHostMetrics bool        `json:"skip_host_metrics,omitempty"`
 }
 type Control struct {
 	Kind string `json:"kind"`
@@ -71,41 +72,44 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 			return false
 		}
 	}
-	wg.Add(3)
-	go func() {
-		defer wg.Done()
-		runner := platform.Command{Host: c.Host}
-		timer := time.NewTicker(time.Second)
-		defer timer.Stop()
-		disk := map[string]float64{}
-		lastDisk := time.Time{}
-		for {
-			sample := metrics.HostFast(ctx, hostFiles{}, c.Host)
-			if time.Since(lastDisk) >= 30*time.Second {
-				values := metrics.RootDisk(ctx, runner)
-				if len(values) > 0 {
-					disk = values
-					lastDisk = time.Now()
+	wg.Add(2)
+	if !request.SkipHostMetrics {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runner := platform.Command{Host: c.Host}
+			timer := time.NewTicker(time.Second)
+			defer timer.Stop()
+			disk := map[string]float64{}
+			lastDisk := time.Time{}
+			for {
+				sample := metrics.HostFast(ctx, hostFiles{}, c.Host)
+				if time.Since(lastDisk) >= 30*time.Second {
+					values := metrics.RootDisk(ctx, runner)
+					if len(values) > 0 {
+						disk = values
+						lastDisk = time.Now()
+					}
+				}
+				if !lastDisk.IsZero() && time.Since(lastDisk) <= 60*time.Second {
+					for key, value := range disk {
+						sample.Values[key] = value
+					}
+					sample.Values["disk_observed_unix_seconds"] = float64(lastDisk.Unix())
+				} else {
+					sample.Unavailable = append(sample.Unavailable, "Root filesystem sample unavailable or stale")
+				}
+				if !send(Message{Kind: "host_metrics", Sample: &sample, ObservedAt: sample.ObservedAt}) {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-timer.C:
 				}
 			}
-			if !lastDisk.IsZero() && time.Since(lastDisk) <= 60*time.Second {
-				for key, value := range disk {
-					sample.Values[key] = value
-				}
-				sample.Values["disk_observed_unix_seconds"] = float64(lastDisk.Unix())
-			} else {
-				sample.Unavailable = append(sample.Unavailable, "Root filesystem sample unavailable or stale")
-			}
-			if !send(Message{Kind: "host_metrics", Sample: &sample, ObservedAt: sample.ObservedAt}) {
-				return
-			}
-			select {
-			case <-ctx.Done():
-				return
-			case <-timer.C:
-			}
-		}
-	}()
+		}()
+	}
 	go func() {
 		defer wg.Done()
 		timer := time.NewTicker(30 * time.Second)

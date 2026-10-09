@@ -1,6 +1,12 @@
 .git
 .tools
-local
 bin
+output
+local
+/hostops.json
+.ssh
+*.pem
+*.key
 .env*
 *.db*
+*.exe

@@ -148,7 +148,7 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 		fmt.Fprintln(out, "The optional VPS service keeps only a rolling 30 minutes of host CPU, memory, load and root-disk samples.")
 		fmt.Fprintln(out, "It samples lightweight counters every second, checkpoints history every 15 seconds, and opens no network port.")
 		fmt.Fprintln(out, "Installation uses sudo for a non-root SSH account (or your existing root SSH login) to create the locked service account and unit; HostOps never saves a sudo password.")
-		continuous, promptErr := askYesNo(input, out, "Enable always-on history while the dashboard is closed? [Y/n] ", true)
+		continuous, promptErr := askYesNo(input, out, "Enable always-on history while the dashboard is closed? [y/N] ", false)
 		if promptErr != nil {
 			fmt.Fprintln(errOut, promptErr)
 			return 1

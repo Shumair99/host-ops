@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"github.com/Shumair99/host-ops/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +18,23 @@ func TestSiteBeforeFlagsDoesNotMutateArguments(t *testing.T) {
 	}
 	if args[1] != "client-a" || !bytes.Contains(out.Bytes(), []byte(`"id": "client-a"`)) {
 		t.Fatal("site argument lost or caller's slice mutated")
+	}
+}
+
+func TestStartEnterKeepsPrivilegedServiceDisabled(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "hostops.json")
+	if err := os.WriteFile(path, []byte(`{"host":{"id":"h","ssh":"ops@example.com"},"sites":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := RunWithInput(context.Background(), []string{"start", "--config", path, "--db", filepath.Join(dir, "history", "history.db"), "--once", "--no-collect"}, strings.NewReader("\n"), &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, errOut.String())
+	}
+	c, err := config.Load(path)
+	if err != nil || c.Host.HistoryMode != "session" || !strings.Contains(out.String(), "[y/N]") {
+		t.Fatalf("unexpected default: %+v %v %s", c, err, out.String())
 	}
 }
 

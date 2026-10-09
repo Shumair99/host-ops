@@ -1,6 +1,6 @@
 module github.com/Shumair99/host-ops
 
-go 1.26.0
+go 1.27.2
 
 require (
 	charm.land/bubbletea/v2 v2.0.10

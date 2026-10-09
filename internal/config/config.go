@@ -122,6 +122,13 @@ type Recovery struct {
 }
 
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
+
+// Unit names can contain a template instance and systemd's escaped bytes. They
+// are still passed as literal command arguments, never shell expressions.
+var serviceUnit = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9_.:@-]|\\x[0-9a-fA-F]{2}){0,254}$`)
+
+func validServiceUnit(unit string) bool { return len(unit) <= 255 && serviceUnit.MatchString(unit) }
+
 var sshTarget = regexp.MustCompile(`^([a-zA-Z0-9_.-]+@)?[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 func Load(path string) (Config, error) {
@@ -148,7 +155,7 @@ func (c *Config) Validate() error {
 		return err
 	}
 	for _, unit := range c.Host.ServiceUnits {
-		if !identifier.MatchString(unit) {
+		if !validServiceUnit(unit) {
 			return fmt.Errorf("invalid configured service unit")
 		}
 	}
@@ -270,7 +277,7 @@ func (c *Config) Validate() error {
 				}
 			}
 		case "systemd":
-			if !identifier.MatchString(s.Runtime.Unit) {
+			if !validServiceUnit(s.Runtime.Unit) {
 				return fmt.Errorf("site %s: invalid systemd unit", s.ID)
 			}
 		default:

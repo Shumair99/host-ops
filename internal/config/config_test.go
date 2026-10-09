@@ -2,6 +2,20 @@ package config
 
 import "testing"
 
+func TestServiceUnitsSupportInstancesWithoutAcceptingShellSyntax(t *testing.T) {
+	for _, unit := range []string{"web.service", "getty@tty1.service", "worker@customer-1.service", `worker@tenant\x2d1.service`} {
+		c := Config{Host: Host{ID: "h", ServiceUnits: []string{unit}}, Sites: []Site{{ID: "s", HostID: "h", Name: "Site", Runtime: Runtime{Type: "systemd", Unit: unit}}}}
+		if err := c.Validate(); err != nil {
+			t.Fatalf("unit %q rejected: %v", unit, err)
+		}
+	}
+	for _, unit := range []string{"-bad.service", "web.service;id", "web\n.service", "../../web.service", "worker@$(id).service", `worker@bad\q.service`} {
+		if (&Config{Host: Host{ID: "h", ServiceUnits: []string{unit}}}).Validate() == nil {
+			t.Fatalf("unsafe unit accepted: %q", unit)
+		}
+	}
+}
+
 func TestUnsafeManifestIsRejected(t *testing.T) {
 	base := Config{Host: Host{ID: "h"}, Sites: []Site{{ID: "s", HostID: "h", Name: "S", Runtime: Runtime{Type: "docker", Container: "s"}}}}
 	for _, mutate := range []func(*Config){

@@ -236,7 +236,7 @@ func CollectOnce(ctx context.Context, c config.Config, store *storage.Store) err
 	if err != nil {
 		return err
 	}
-	session, err := collector.Start(ctx, c, path)
+	session, err := collector.Start(ctx, c, path, false)
 	if err != nil {
 		return err
 	}
@@ -352,7 +352,7 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-	session, err := collector.Start(ctx, c, path)
+	session, err := collector.Start(ctx, c, path, c.Host.HistoryMode == "continuous")
 	if err != nil {
 		return err
 	}

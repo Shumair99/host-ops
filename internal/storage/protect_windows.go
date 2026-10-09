@@ -26,7 +26,7 @@ func protectHistory(path string, created bool) error {
 	if err != nil {
 		return err
 	}
-	if created || len(entries) == 0 || strings.EqualFold(filepath.Base(dir), "local") {
+	if created || len(entries) == 0 {
 		if err = setPrivateACL(dir, sid); err != nil {
 			return fmt.Errorf("protect history directory: %w", err)
 		}
@@ -36,7 +36,7 @@ func protectHistory(path string, created bool) error {
 			return err
 		}
 		if !privateACL(sd.String(), sid) {
-			return fmt.Errorf("history directory grants access to other users; choose a new private directory or local/hostops.db")
+			return fmt.Errorf("history directory grants access to other users; choose a new dedicated private directory")
 		}
 		if err = setPrivateACL(dir, sid); err != nil {
 			return fmt.Errorf("protect history directory: %w", err)

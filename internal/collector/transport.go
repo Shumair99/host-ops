@@ -117,7 +117,7 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func Start(ctx context.Context, c config.Config, path string) (*Session, error) {
+func Start(ctx context.Context, c config.Config, path string, skipHostMetrics bool) (*Session, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	var cmd *exec.Cmd
 	if c.Host.SSH != "" {
@@ -155,7 +155,7 @@ func Start(ctx context.Context, c config.Config, path string) (*Session, error) 
 			host.ServiceUnits = append(host.ServiceUnits, site.Runtime.Unit)
 		}
 	}
-	if err = json.NewEncoder(stdin).Encode(Request{Version: discovery.ProtocolVersion, Host: host}); err != nil {
+	if err = json.NewEncoder(stdin).Encode(Request{Version: discovery.ProtocolVersion, Host: host, SkipHostMetrics: skipHostMetrics}); err != nil {
 		s.Close()
 		return nil, err
 	}

@@ -33,7 +33,7 @@ func TestStartEnterKeepsPrivilegedServiceDisabled(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, errOut.String())
 	}
 	c, err := config.Load(path)
-	if err != nil || c.Host.HistoryMode != "session" || !strings.Contains(out.String(), "[y/N]") {
+	if err != nil || c.Host.HistoryMode != "session" || !strings.Contains(out.String(), "[Y/N] (default: N)") {
 		t.Fatalf("unexpected default: %+v %v %s", c, err, out.String())
 	}
 }

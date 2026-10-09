@@ -145,10 +145,14 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 	}
 
 	if c.Host.HistoryMode == "" {
-		fmt.Fprintln(out, "The optional VPS service keeps only a rolling 30 minutes of host CPU, memory, load and root-disk samples.")
-		fmt.Fprintln(out, "It samples lightweight counters every second, checkpoints history every 15 seconds, and opens no network port.")
-		fmt.Fprintln(out, "Installation uses sudo for a non-root SSH account (or your existing root SSH login) to create the locked service account and unit; HostOps never saves a sudo password.")
-		continuous, promptErr := askYesNo(input, out, "Enable always-on history while the dashboard is closed? [y/N] ", false)
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Optional VPS history")
+		fmt.Fprintln(out, "  Keeps a rolling 30-minute window of CPU, memory, load, and root-disk samples.")
+		fmt.Fprintln(out, "  Samples once per second; checkpoints every 15 seconds; opens no network port.")
+		fmt.Fprintln(out, "  Installation uses root privileges to create a locked account and install the service.")
+		fmt.Fprintln(out, "  HostOps never saves your sudo password.")
+		fmt.Fprintln(out)
+		continuous, promptErr := askYesNo(input, out, "Keep history running while the dashboard is closed? [Y/N] (default: N): ", false)
 		if promptErr != nil {
 			fmt.Fprintln(errOut, promptErr)
 			return 1
@@ -167,9 +171,11 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 				c.Host.HistoryMode = "session"
 				if saveErr := saveConnectionConfig(*path, c); saveErr != nil {
 					fmt.Fprintf(errOut, "Also could not save session-only mode: %v\n", saveErr)
+					fmt.Fprintf(errOut, "VPS history service was not enabled: %v\n", err)
+					return 1
 				}
-				fmt.Fprintf(errOut, "VPS history service was not enabled: %v\nRetry later with `hostops agent install`.\n", err)
-				return 1
+				fmt.Fprintf(errOut, "Always-on history was not enabled: %v\n", err)
+				fmt.Fprintln(out, "Continuing with session-only history. You can retry later with `hostops agent install`.")
 			}
 		}
 	}
@@ -282,7 +288,7 @@ func agentCommand(ctx context.Context, args []string, input io.Reader, out, errO
 			fmt.Fprintln(errOut, "VPS agent removal requires a configured SSH target")
 			return 1
 		}
-		confirmed, promptErr := askYesNo(input, out, "Remove the VPS service and its retained 30-minute history? [y/N] ", false)
+		confirmed, promptErr := askYesNo(input, out, "Remove the VPS service and its saved 30-minute history? [Y/N] (default: N): ", false)
 		if promptErr != nil {
 			fmt.Fprintln(errOut, promptErr)
 			return 1

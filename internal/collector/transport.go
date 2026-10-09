@@ -12,7 +12,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -71,11 +70,17 @@ func Bootstrap(ctx context.Context, c config.Config) (string, error) {
 	}
 	file := c.Discovery.CollectorFile
 	if file == "" {
-		exe, err := os.Executable()
-		if err != nil {
-			return "", fmt.Errorf("cannot locate the HostOps release bundle")
+		relative := "collectors/linux-" + arch + "/hostops"
+		file = bundledAsset(relative)
+		if file == "" {
+			file = sourceAsset(relative)
 		}
-		file = filepath.Join(filepath.Dir(exe), "collectors", "linux-"+arch, "hostops")
+		if file == "" {
+			file, err = buildSourceAsset(ctx, relative, "./cmd/hostops", arch, "matching Linux discovery collector")
+			if err != nil {
+				return "", err
+			}
+		}
 	}
 	binary, err := readCollectorBinary(file, arch)
 	if err != nil {

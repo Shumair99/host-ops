@@ -89,6 +89,28 @@ func vpsAgentBinary(architecture, override string) ([]byte, error) {
 	return data, nil
 }
 
+func preparedVPSAgentBinary(ctx context.Context, architecture, override string, out io.Writer) ([]byte, error) {
+	if override != "" {
+		return vpsAgentBinary(architecture, override)
+	}
+	relative := path.Join("agents", "vps", "linux-"+architecture, "hostops-vps-agent")
+	asset := bundledAsset(relative)
+	if asset == "" {
+		asset = sourceAsset(relative)
+	}
+	if asset == "" {
+		if sourceRoot() != "" {
+			fmt.Fprintf(out, "Preparing the Linux VPS history agent for %s from this checkout...\n", architecture)
+		}
+		var err error
+		asset, err = buildSourceAsset(ctx, relative, "./cmd/hostops-vps-agent", architecture, "matching Linux VPS history agent")
+		if err != nil {
+			return nil, err
+		}
+	}
+	return vpsAgentBinary(architecture, asset)
+}
+
 func remoteAgentCache(ctx context.Context, c config.Config) (string, error) {
 	data, err := (platform.Command{Host: c.Host}).Run(ctx, "sh", "-c", `printf '%s' "${XDG_CACHE_HOME:-$HOME/.cache}/hostops"`)
 	if err != nil {
@@ -181,7 +203,7 @@ func InstallVPSAgent(ctx context.Context, c config.Config, override string, inpu
 	if err != nil {
 		return err
 	}
-	binary, err := vpsAgentBinary(architecture, override)
+	binary, err := preparedVPSAgentBinary(ctx, architecture, override, out)
 	if err != nil {
 		return err
 	}

@@ -23,3 +23,5 @@ done
   ./internal/collector -run '^TestVPSAgentDisposableSystemdLifecycle$'
 "$engine" exec "$container" go test ./internal/discovery -run '^$' \
   -fuzz '^FuzzProxyConfigurationParsers$' -fuzztime 10s -parallel 2
+"$engine" exec "$container" go test ./internal/storage -run '^$' \
+  -fuzz '^FuzzBlockDecoder$' -fuzztime 10s -parallel 2

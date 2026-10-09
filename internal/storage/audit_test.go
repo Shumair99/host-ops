@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -28,16 +30,19 @@ func TestOrderedMigrationPreservesLegacyHistoryAndRejectsFutureSchema(t *testing
 	for _, version := range []int{0, 1} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "legacy.db")
+			if err := protectHistory(path, false); err != nil {
+				t.Fatal(err)
+			}
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = db.Exec(migrations[0] + ` INSERT INTO dedup VALUES('h','deployment','old'); INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES('h','s','deployment','2026-01-01T00:00:00Z','{"id":"old"}'); PRAGMA user_version=` + fmt.Sprint(version))
+			if err != nil {
+				t.Fatal(err)
+			}
+			db.Close()
 			s, err := Open(path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = s.DB.Exec(`DROP TABLE history_imports; DROP TABLE dedup; CREATE TABLE dedup(host_id TEXT NOT NULL,kind TEXT NOT NULL,event_key TEXT NOT NULL,PRIMARY KEY(host_id,kind,event_key)); INSERT INTO dedup VALUES('h','deployment','old'); INSERT INTO records(host_id,site_id,kind,observed_at,data) VALUES('h','s','deployment','2026-01-01T00:00:00Z','{"id":"old"}'); PRAGMA user_version=` + fmt.Sprint(version))
-			if err != nil {
-				t.Fatal(err)
-			}
-			s.Close()
-			s, err = Open(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -45,7 +50,7 @@ func TestOrderedMigrationPreservesLegacyHistoryAndRejectsFutureSchema(t *testing
 			if err = s.DB.QueryRow("PRAGMA user_version").Scan(&gotVersion); err != nil || gotVersion != schemaVersion {
 				t.Fatal(gotVersion, err)
 			}
-			if err = s.DB.QueryRow("SELECT count(*) FROM records").Scan(&count); err != nil || count != 1 {
+			if err = s.DB.QueryRow("SELECT COALESCE(sum(samples),0) FROM blocks").Scan(&count); err != nil || count != 1 {
 				t.Fatal("history lost", count, err)
 			}
 			if inserted, err := s.AddOnce(context.Background(), "h", "s", "deployment", "old", time.Now(), map[string]string{}); err != nil || inserted {
@@ -148,7 +153,7 @@ func TestFiniteRetentionPrunesEvidenceAndLinkedDedup(t *testing.T) {
 		t.Fatal(err)
 	}
 	var records, keys int
-	s.DB.QueryRow("SELECT count(*) FROM records").Scan(&records)
+	s.DB.QueryRow("SELECT COALESCE(sum(samples),0) FROM blocks").Scan(&records)
 	s.DB.QueryRow("SELECT count(*) FROM dedup").Scan(&keys)
 	if records != 6 || keys != 6 {
 		t.Fatal("finite retention did not prune linked keys", records, keys)
@@ -167,7 +172,12 @@ func TestStorageBudgetPrunesHistoryProtectsOpenIncidentsAndWarns(t *testing.T) {
 		}
 	}
 	for i := 0; i < 350; i++ {
-		if _, err := s.Add(ctx, "h", "s", "metrics", time.Now(), map[string]any{"payload": strings.Repeat("x", 64*1024), "sequence": i}); err != nil {
+		// High-entropy evidence must still exercise pressure after compression.
+		payload := make([]byte, 64*1024)
+		if _, err := rand.Read(payload); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Add(ctx, "h", "s", "metrics", time.Now(), map[string]any{"payload": payload, "sequence": i}); err != nil {
 			t.Fatal(i, err)
 		}
 	}
@@ -231,9 +241,9 @@ func TestOneHourHistoryGrowthFixture(t *testing.T) {
 	}
 	var size, inventoryRows int64
 	s.DB.QueryRow(`SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()`).Scan(&size)
-	s.DB.QueryRow("SELECT count(*) FROM records WHERE kind='inventory'").Scan(&inventoryRows)
-	t.Logf("one-hour fixture: %.2f MiB, %.2f MiB/day extrapolated, %d inventory row(s); synthetic, not a live host benchmark", float64(size)/(1024*1024), float64(size)*24/(1024*1024), inventoryRows)
-	if size > 8*1024*1024 || inventoryRows != 1 {
+	s.DB.QueryRow("SELECT COALESCE(sum(b.samples),0) FROM blocks b JOIN streams s ON b.stream_id=s.id WHERE s.kind='inventory'").Scan(&inventoryRows)
+	t.Logf("one-hour fixture including fixed inventory/state: %.2f MiB, %d inventory row(s); use the full-day fixture rather than multiplying fixed overhead", float64(size)/(1024*1024), inventoryRows)
+	if size > 1024*1024 || inventoryRows != 1 {
 		t.Fatal("history growth regressed", size, inventoryRows)
 	}
 	var r map[string]any

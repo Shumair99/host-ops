@@ -109,7 +109,11 @@ func TestRetentionPrunesPersistentHistoryDedupKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := store.DB.QueryRow(`SELECT count(*) FROM history_imports`).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("pruned sample keys retained, or current key lost: count %d, err %v", count, err)
+	if err := store.DB.QueryRow(`SELECT COALESCE(sum(samples),0) FROM blocks`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("pruned sample retained, or current sample lost: count %d, err %v", count, err)
+	}
+	inserted, err := store.AddUnique(ctx, "h", "", "host_metrics", old.Add(time.Minute), map[string]int{"sample": 1})
+	if err != nil || inserted {
+		t.Fatal("protected sample lost replay deduplication", inserted, err)
 	}
 }

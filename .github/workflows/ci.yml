@@ -29,6 +29,8 @@ jobs:
         run: |
           go test -race ./...
           go test ./internal/discovery -run '^$' -fuzz '^FuzzProxyConfigurationParsers$' -fuzztime 10s -parallel 2
+          go test ./internal/storage -run '^$' -fuzz '^FuzzBlockDecoder$' -fuzztime 10s -parallel 2
+          HOSTOPS_STORAGE_BENCH=1 go test ./internal/storage -run '^TestFullDayLosslessStorageComparison$' -count=1 -v
           bash scripts/build-bundles.sh
   systemd-lab:
     runs-on: ubuntu-latest

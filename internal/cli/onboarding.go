@@ -152,7 +152,7 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 		fmt.Fprintln(out, "  Installation uses root privileges to create a locked account and install the service.")
 		fmt.Fprintln(out, "  HostOps never saves your sudo password.")
 		fmt.Fprintln(out)
-		continuous, promptErr := askYesNo(input, out, "Keep history running while the dashboard is closed? [Y/N] (default: N): ", false)
+		continuous, promptErr := askYesNo(input, out, "Enable always-on history while the dashboard is closed? [y/N] ", false)
 		if promptErr != nil {
 			fmt.Fprintln(errOut, promptErr)
 			return 1
@@ -288,7 +288,7 @@ func agentCommand(ctx context.Context, args []string, input io.Reader, out, errO
 			fmt.Fprintln(errOut, "VPS agent removal requires a configured SSH target")
 			return 1
 		}
-		confirmed, promptErr := askYesNo(input, out, "Remove the VPS service and its saved 30-minute history? [Y/N] (default: N): ", false)
+		confirmed, promptErr := askYesNo(input, out, "Remove the VPS service and its retained 30-minute history? [y/N] ", false)
 		if promptErr != nil {
 			fmt.Fprintln(errOut, promptErr)
 			return 1

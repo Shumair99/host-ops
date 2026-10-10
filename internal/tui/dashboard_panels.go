@@ -169,8 +169,8 @@ func overviewTrendLabel(width int) string {
 }
 
 // Full and half blocks are supported by Consolas, Lucida Console and Cascadia
-// Mono. A measured zero uses a full-width lower block at the plot baseline so
-// adjacent zeroes connect; missing observations remain blank.
+// Mono. A measured zero uses a terminal underline on a space so adjacent zeroes
+// connect at the cell baseline; missing observations remain blank.
 func barPlot(buckets []*float64, height int, ceiling float64) []string {
 	height = max(1, height)
 	rows := make([]string, height)
@@ -179,6 +179,7 @@ func barPlot(buckets []*float64, height int, ceiling float64) []string {
 		var b strings.Builder
 		for _, v := range buckets {
 			glyph := ' '
+			underlineBaseline := false
 			if v != nil {
 				level := 0
 				if *v > 0 && ceiling > 0 {
@@ -190,10 +191,14 @@ func barPlot(buckets []*float64, height int, ceiling float64) []string {
 				case level > 2*y:
 					glyph = '▄'
 				case level == 0 && y == 0:
-					glyph = '▁'
+					underlineBaseline = true
 				}
 			}
-			b.WriteRune(glyph)
+			if underlineBaseline {
+				b.WriteString("\x1b[4m \x1b[24m")
+			} else {
+				b.WriteRune(glyph)
+			}
 		}
 		rows[row] = b.String()
 	}

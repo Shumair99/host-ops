@@ -81,6 +81,22 @@ func TestOverviewKeepsExactThirtyMinuteWindow(t *testing.T) {
 	}
 }
 
+func TestOverviewTrendLabelFitsAvailableWidth(t *testing.T) {
+	for _, test := range []struct {
+		width int
+		want  string
+	}{
+		{width: 21, want: "Last 30 min · 0–100%"},
+		{width: 20, want: "30m · 0–100%"},
+		{width: 13, want: "30m · 0–100%"},
+		{width: 12, want: "30m"},
+	} {
+		if got := overviewTrendLabel(test.width); got != test.want {
+			t.Errorf("overviewTrendLabel(%d) = %q, want %q", test.width, got, test.want)
+		}
+	}
+}
+
 func TestOverviewMeasuredZeroUsesConnectedThinBaseline(t *testing.T) {
 	m := testDashboard(t)
 	m.snapshot.History = []metrics.Sample{{ObservedAt: time.Now(), Values: map[string]float64{"cpu_percent": 0}}}

@@ -159,11 +159,11 @@ func recentBuckets(samples []metrics.Sample, key string, width int, now time.Tim
 }
 
 func overviewTrendLabel(width int) string {
-	if width >= 21 {
-		return "Last 30 min · 0–100%"
+	if width >= 15 {
+		return "Last 30 minutes"
 	}
-	if width >= 13 {
-		return "30m · 0–100%"
+	if width >= 6 {
+		return "30 min"
 	}
 	return "30m"
 }

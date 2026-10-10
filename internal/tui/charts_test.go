@@ -86,10 +86,10 @@ func TestOverviewTrendLabelFitsAvailableWidth(t *testing.T) {
 		width int
 		want  string
 	}{
-		{width: 21, want: "Last 30 min · 0–100%"},
-		{width: 20, want: "30m · 0–100%"},
-		{width: 13, want: "30m · 0–100%"},
-		{width: 12, want: "30m"},
+		{width: 15, want: "Last 30 minutes"},
+		{width: 14, want: "30 min"},
+		{width: 6, want: "30 min"},
+		{width: 5, want: "30m"},
 	} {
 		if got := overviewTrendLabel(test.width); got != test.want {
 			t.Errorf("overviewTrendLabel(%d) = %q, want %q", test.width, got, test.want)

@@ -65,7 +65,7 @@ Building requires Go 1.27.2 or newer. On Windows, `scripts/check.ps1` runs tests
 
 Readiness, recovery, security/exposure, cost allocation, capacity, preflight, dependency impact, deployment records and incident capsules are available through the terminal. `hostops record` imports evidence; see the [deployment](docs/deployments.md), [recovery](docs/recovery.md) and [watcher](docs/watcher.md) guides. HostOps does not execute repairs, maintenance or restores.
 
-Local history has [configurable retention and a 256 MiB default database budget](docs/history.md). Machine-specific manifests and history belong in ignored `local/`; keep credentials, private keys, environment values and raw runtime dumps out of Git. On Windows, a shared workspace directory may be refused if its ACL allows other accounts to read it. Choose a private database path with `--db`, for example:
+Local history has [configurable retention and a 256 MiB default database budget](docs/history.md). HostOps stores history in a private per-user cache directory by default; machine-specific manifests belong in ignored `local/`. Keep credentials, private keys, environment values and raw runtime dumps out of Git. Override the history location with `--db` when needed. On Windows, HostOps refuses a custom directory if its ACL allows other accounts to read it. For example:
 
 ```powershell
 .\bin\hostops.exe dashboard --config local/hostops.json --db "$env:LOCALAPPDATA\HostOps\history.db"

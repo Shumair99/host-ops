@@ -35,7 +35,7 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 	flags := flag.NewFlagSet("start", flag.ContinueOnError)
 	flags.SetOutput(errOut)
 	path := flags.String("config", defaultConnectionConfig(), "connection settings")
-	db := flags.String("db", "local/hostops.db", "local history database")
+	db := flags.String("db", "", "local history database (default: private per-user cache)")
 	identity := flags.String("identity", "", "existing SSH private key file")
 	port := flags.Int("port", 0, "SSH port; zero uses SSH configuration")
 	collectorFile := flags.String("collector", "", "Linux discovery collector from the release bundle")
@@ -60,6 +60,11 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 	}
 	if *interval < 5*time.Second {
 		fmt.Fprintln(errOut, "public HTTP check interval must be at least 5s")
+		return 1
+	}
+	if resolved, ok := resolveHistoryPath(*db, errOut); ok {
+		*db = resolved
+	} else {
 		return 1
 	}
 

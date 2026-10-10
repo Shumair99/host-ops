@@ -9,7 +9,7 @@ The dashboard runs its collector automatically. `hostops-agent` can keep full co
 ```sh
 hostops metrics --config local/hostops.json
 hostops metrics client-a --config local/hostops.json
-hostops history client-a --config local/hostops.json --db local/hostops.db --since 24h
+hostops history client-a --config local/hostops.json --since 24h
 hostops disk --config local/hostops.json
 ```
 

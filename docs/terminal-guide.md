@@ -105,7 +105,7 @@ Tools contains Security (`u`), Capacity (`p`), Impact (`x`), Readiness (`r`), Re
 If you want history to continue while the dashboard is closed, run the headless collector in a separate terminal:
 
 ```powershell
-.\bin\hostops-agent.exe --config local/hostops.json --db local/hostops.db --interval 30s
+.\bin\hostops-agent.exe --config local/hostops.json --interval 30s
 ```
 
 Then open the dashboard against the same database with `--no-collect`. That uses the agent's inventory and metrics and disables automatic Disk scans; inspection views can still run manual reads. `--no-collect --once --page disk` uses only retained storage evidence. Use one active collector per database to avoid duplicate samples. The collector stops with Ctrl+C and opens no management port.

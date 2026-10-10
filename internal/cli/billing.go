@@ -38,7 +38,7 @@ func billingCommand(ctx context.Context, args []string, out, errOut io.Writer) i
 		}
 	}
 	file := flags.String("config", defaultConfig, "connection settings")
-	dbPath := flags.String("db", "local/hostops.db", "local evidence database")
+	dbPath := flags.String("db", "", "local evidence database (default: private per-user cache)")
 	provider := flags.String("provider", "", "billing source")
 	resource := flags.String("resource", "", "exact provider server/subscription ID")
 	tokenEnv := flags.String("token-env", "", "environment variable holding API token")
@@ -63,6 +63,11 @@ func billingCommand(ctx context.Context, args []string, out, errOut io.Writer) i
 		}
 		fmt.Fprintln(out, "Choose the resource belonging to this host, then run billing set --provider NAME --resource ID. Hardware size alone cannot prove billing identity.")
 		return 0
+	}
+	if resolved, ok := resolveHistoryPath(*dbPath, errOut); ok {
+		*dbPath = resolved
+	} else {
+		return 1
 	}
 	c, err := config.Load(*file)
 	if err != nil {

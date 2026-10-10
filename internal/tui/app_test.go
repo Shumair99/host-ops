@@ -9,11 +9,26 @@ import (
 	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/storage"
 	"github.com/charmbracelet/x/ansi"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestRunIncludesHistoryOpenFailure(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(blocker, "history.db")
+	err := Run(context.Background(), config.Config{}, dbPath, Options{Once: true, NoCollect: true}, strings.NewReader(""), io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "dashboard history unavailable:") || !strings.Contains(err.Error(), "not-a-directory") {
+		t.Fatalf("expected actionable history open error, got %v", err)
+	}
+}
 
 func testDashboard(t *testing.T) dashboard {
 	t.Helper()

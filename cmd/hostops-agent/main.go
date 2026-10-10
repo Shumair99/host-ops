@@ -15,17 +15,25 @@ import (
 
 func main() {
 	manifest := flag.String("config", "hostops.json", "site manifest")
-	db := flag.String("db", "local/hostops.db", "SQLite history")
+	db := flag.String("db", "", "SQLite history (default: private per-user cache)")
 	interval := flag.Duration("interval", 30*time.Second, "collection interval")
 	once := flag.Bool("once", false, "collect once and exit")
 	flag.Parse()
+	dbPath := *db
+	if dbPath == "" {
+		var err error
+		dbPath, err = storage.DefaultHistoryPath()
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 	c, err := config.Load(*manifest)
 	if err != nil {
 		log.Fatal(err)
 	}
-	store, err := storage.Open(*db)
+	store, err := storage.Open(dbPath)
 	if err != nil {
 		log.Fatal(err)
 	}

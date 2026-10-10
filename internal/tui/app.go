@@ -130,7 +130,7 @@ func Run(parent context.Context, c config.Config, dbPath string, opts Options, i
 	}
 	store, err := storage.Open(dbPath)
 	if err != nil {
-		return fmt.Errorf("dashboard history unavailable")
+		return fmt.Errorf("dashboard history unavailable: %w", err)
 	}
 	defer store.Close()
 	if err = store.Prune(ctx, c.History); err != nil {

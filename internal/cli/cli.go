@@ -67,7 +67,7 @@ Options:
   --config FILE     Manifest (default: HOSTOPS_CONFIG or hostops.json)
   --json            Machine-readable output
 
-  --db FILE         Local SQLite history (default local/hostops.db)
+  --db FILE         Local SQLite history (default: private per-user cache)
   --since DURATION  Historical query window (default 24h)
   --history         Read saved metrics without a remote probe (metrics command)
   --resolution MODE Saved metric detail: auto, raw, 5m, 30m
@@ -133,7 +133,7 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	}
 	path := flags.String("config", defaultPath, "site manifest")
 	asJSON := flags.Bool("json", false, "JSON output")
-	db := flags.String("db", "local/hostops.db", "history database")
+	db := flags.String("db", "", "history database (default: private per-user cache)")
 	since := flags.String("since", "24h", "history window")
 	file := flags.String("file", "", "evidence input file")
 	demo := flags.Bool("demo", false, "offline demo")
@@ -152,6 +152,13 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 		flagArgs = flagArgs[1:]
 	}
 	if err := flags.Parse(flagArgs); err != nil {
+		return 1
+	}
+	if command == "dashboard" && *demo && *db == "" {
+		*db = ":memory:"
+	} else if resolved, ok := resolveHistoryPath(*db, errOut); ok {
+		*db = resolved
+	} else {
 		return 1
 	}
 	if *maxAge <= 0 {

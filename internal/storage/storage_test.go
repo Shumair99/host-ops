@@ -2,13 +2,43 @@ package storage
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/model"
 )
+
+func TestDefaultHistoryPathUsesPerUserCache(t *testing.T) {
+	cacheDir := filepath.Join(t.TempDir(), "cache")
+	if runtime.GOOS == "windows" {
+		t.Setenv("LOCALAPPDATA", cacheDir)
+	} else {
+		t.Setenv("XDG_CACHE_HOME", cacheDir)
+	}
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DefaultHistoryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(cacheDir, "HostOps", "history.db")
+	if got != want {
+		t.Fatalf("default history path = %q, want %q", got, want)
+	}
+	store, err := Open(got)
+	if err != nil {
+		t.Fatalf("open default history path: %v", err)
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestPersistenceLatestAndHostIsolation(t *testing.T) {
 	ctx := context.Background()

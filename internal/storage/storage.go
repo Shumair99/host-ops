@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -22,6 +23,19 @@ type Store struct {
 }
 
 const timestampLayout = "2006-01-02T15:04:05.000000000Z"
+
+// DefaultHistoryPath returns the private, per-user location used when a
+// caller does not explicitly select a history database.
+func DefaultHistoryPath() (string, error) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("locate the per-user history directory: %w", err)
+	}
+	if cacheDir == "" {
+		return "", fmt.Errorf("the operating system did not provide a per-user cache directory")
+	}
+	return filepath.Join(cacheDir, "HostOps", "history.db"), nil
+}
 
 type Record struct {
 	ID         int64           `json:"id"`

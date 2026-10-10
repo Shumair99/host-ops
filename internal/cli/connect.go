@@ -23,7 +23,7 @@ func connect(ctx context.Context, args []string, out, errOut io.Writer) int {
 	identity := flags.String("identity", "", "existing SSH private key file")
 	port := flags.Int("port", 0, "SSH port; zero uses SSH configuration")
 	collector := flags.String("collector", "", "Linux collector from the release bundle")
-	db := flags.String("db", "local/hostops.db", "inventory database")
+	db := flags.String("db", "", "inventory database (default: private per-user cache)")
 	target := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		target = args[0]
@@ -40,6 +40,11 @@ func connect(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	if target == "" {
 		fmt.Fprintln(errOut, "Usage: hostops connect user@vps [--identity FILE]")
+		return 1
+	}
+	if resolved, ok := resolveHistoryPath(*db, errOut); ok {
+		*db = resolved
+	} else {
 		return 1
 	}
 	c := config.Config{Host: config.Host{ID: discovery.StableID("host", target), Name: target, SSH: target, IdentityFile: *identity}, Discovery: config.Discovery{CollectorFile: *collector}}
@@ -101,7 +106,7 @@ func discover(ctx context.Context, args []string, out, errOut io.Writer) int {
 		}
 	}
 	file := flags.String("config", defaultFile, "connection settings")
-	db := flags.String("db", "local/hostops.db", "inventory database")
+	db := flags.String("db", "", "inventory database (default: private per-user cache)")
 	asJSON := flags.Bool("json", false, "JSON output")
 	cached := flags.Bool("no-collect", false, "use existing inventory")
 	allServices := flags.Bool("all-services", false, "include non-listening systemd services")
@@ -110,6 +115,11 @@ func discover(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	if flags.NArg() != 0 {
 		fmt.Fprintln(errOut, "discover takes no site argument")
+		return 1
+	}
+	if resolved, ok := resolveHistoryPath(*db, errOut); ok {
+		*db = resolved
+	} else {
 		return 1
 	}
 	c, err := config.Load(*file)

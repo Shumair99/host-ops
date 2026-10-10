@@ -26,6 +26,81 @@ func TestBarPlotPreservesZeroSmallValuesAndMissingSamples(t *testing.T) {
 	}
 }
 
+func TestOverviewBucketsStayFixedUntilNextColumn(t *testing.T) {
+	const width = 10
+	bucketWidth := overviewTrendWindow / width
+	base := time.Unix(1_700_000_000, 0)
+	index := base.UnixNano() / int64(bucketWidth)
+	boundary := time.Unix(0, (index+1)*int64(bucketWidth))
+	old := metrics.Sample{
+		ObservedAt: boundary.Add(-time.Second),
+		Values:     map[string]float64{"cpu_percent": 42},
+	}
+	beforeBoundary := boundary.Add(-500 * time.Millisecond)
+	steady := recentBuckets([]metrics.Sample{old}, "cpu_percent", width, beforeBoundary)
+	unchanged := recentBuckets([]metrics.Sample{old}, "cpu_percent", width, beforeBoundary.Add(200*time.Millisecond))
+	if !sameBuckets(steady, unchanged) {
+		t.Fatal("redraw moved a point before its time bucket advanced", steady, unchanged)
+	}
+	if steady[width-1] == nil || *steady[width-1] != 42 {
+		t.Fatal("current bucket lost its latest sample", steady)
+	}
+
+	newSample := metrics.Sample{
+		ObservedAt: boundary.Add(100 * time.Millisecond),
+		Values:     map[string]float64{"cpu_percent": 55},
+	}
+	advanced := recentBuckets([]metrics.Sample{old, newSample}, "cpu_percent", width, boundary.Add(200*time.Millisecond))
+	if advanced[width-2] == nil || *advanced[width-2] != 42 || advanced[width-1] == nil || *advanced[width-1] != 55 {
+		t.Fatal("new bucket did not advance the old point by one column", advanced)
+	}
+}
+
+func TestOverviewKeepsExactThirtyMinuteWindow(t *testing.T) {
+	width := 10
+	now := time.Unix(1_700_000_000, 0).Add(17 * time.Second)
+	inside := metrics.Sample{
+		ObservedAt: now.Add(-overviewTrendWindow + time.Nanosecond),
+		Values:     map[string]float64{"cpu_percent": 33},
+	}
+	points := recentBuckets([]metrics.Sample{inside}, "cpu_percent", width, now)
+	if points[0] == nil || *points[0] != 33 {
+		t.Fatal("oldest sample still inside the window was dropped", points)
+	}
+	expired := inside
+	expired.ObservedAt = now.Add(-overviewTrendWindow - time.Nanosecond)
+	points = recentBuckets([]metrics.Sample{expired}, "cpu_percent", width, now)
+	for _, point := range points {
+		if point != nil {
+			t.Fatal("sample older than 30 minutes stayed visible", points)
+		}
+	}
+}
+
+func TestOverviewMeasuredZeroUsesThinUnderscoreBaseline(t *testing.T) {
+	m := testDashboard(t)
+	m.snapshot.History = []metrics.Sample{{ObservedAt: time.Now(), Values: map[string]float64{"cpu_percent": 0}}}
+	rows := m.spark("cpu_percent", 3, cyan)
+	if got := ansi.Strip(rows[len(rows)-1]); got != "  _" {
+		t.Fatalf("zero baseline should be one ASCII underscore, got %q", got)
+	}
+}
+
+func sameBuckets(a, b []*float64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if (a[i] == nil) != (b[i] == nil) {
+			return false
+		}
+		if a[i] != nil && *a[i] != *b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestAllTrendLevelsUseClassicWindowsConsoleGlyphs(t *testing.T) {
 	m := testDashboard(t)
 	m.width = 120

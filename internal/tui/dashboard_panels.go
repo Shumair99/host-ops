@@ -113,8 +113,6 @@ func (m dashboard) spark(key string, width, color int) []string {
 	}
 	rows := barPlot(buckets, 4, 100)
 	for i := range rows {
-		// A half block is a clear, font-safe base level for measured zero use.
-		rows[i] = strings.ReplaceAll(rows[i], "_", "▄")
 		rows[i] = m.theme.paint(rows[i], color)
 	}
 	return rows
@@ -122,12 +120,20 @@ func (m dashboard) spark(key string, width, color int) []string {
 
 const overviewTrendWindow = 30 * time.Minute
 
-// recentBuckets maps the current Overview window onto a fixed timeline.
-// Missing samples stay blank, and every resource uses its real 0-100% scale.
+// recentBuckets aligns the Overview window to fixed time buckets. The grid
+// stays still between bucket boundaries, so a redraw cannot make samples jump
+// between columns. Missing samples stay blank; values use the real 0-100% scale.
 func recentBuckets(samples []metrics.Sample, key string, width int, now time.Time) []*float64 {
 	width = max(1, width)
 	buckets := make([]*float64, width)
 	newest := make([]time.Time, width)
+	bucketWidth := overviewTrendWindow / time.Duration(width)
+	if bucketWidth < time.Nanosecond {
+		bucketWidth = time.Nanosecond
+	}
+	bucketNanos := int64(bucketWidth)
+	currentBucket := now.UnixNano() / bucketNanos
+	firstBucket := currentBucket - int64(width)
 	start := now.Add(-overviewTrendWindow)
 	for _, sample := range samples {
 		if sample.ObservedAt.Before(start) || sample.ObservedAt.After(now) {
@@ -137,8 +143,13 @@ func recentBuckets(samples []metrics.Sample, key string, width int, now time.Tim
 		if n == nil {
 			continue
 		}
-		x := int(float64(sample.ObservedAt.Sub(start)) / float64(overviewTrendWindow) * float64(width))
-		x = min(width-1, max(0, x))
+		sampleBucket := sample.ObservedAt.UnixNano() / bucketNanos
+		if sampleBucket < firstBucket || sampleBucket > currentBucket {
+			continue
+		}
+		// The exact rolling window can intersect width+1 fixed buckets at
+		// its edges. Fold the two oldest edge buckets into the first cell.
+		x := max(0, int(sampleBucket-firstBucket-1))
 		if buckets[x] == nil || sample.ObservedAt.After(newest[x]) {
 			buckets[x] = n
 			newest[x] = sample.ObservedAt

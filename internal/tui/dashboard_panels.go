@@ -169,8 +169,8 @@ func overviewTrendLabel(width int) string {
 }
 
 // Full and half blocks are supported by Consolas, Lucida Console and Cascadia
-// Mono. Stacking them avoids the fractional glyphs absent in classic consoles.
-// A measured zero has a thin connected baseline; missing observations remain blank.
+// Mono. A measured zero uses a full-width lower block at the plot baseline so
+// adjacent zeroes connect; missing observations remain blank.
 func barPlot(buckets []*float64, height int, ceiling float64) []string {
 	height = max(1, height)
 	rows := make([]string, height)
@@ -190,7 +190,7 @@ func barPlot(buckets []*float64, height int, ceiling float64) []string {
 				case level > 2*y:
 					glyph = '▄'
 				case level == 0 && y == 0:
-					glyph = '─'
+					glyph = '▁'
 				}
 			}
 			b.WriteRune(glyph)

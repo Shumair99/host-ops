@@ -16,16 +16,16 @@ func TestBarPlotPreservesZeroSmallValuesAndMissingSamples(t *testing.T) {
 		points[i] = &values[i]
 	}
 	rows := barPlot(points, 2, 100)
-	if len(rows) != 2 || rows[0] != "    ▄█ " || rows[1] != "─▄▄███ " {
+	if len(rows) != 2 || rows[0] != "    ▄█ " || rows[1] != "▁▄▄███ " {
 		t.Fatalf("zero, small values, heights or gaps were misrepresented: %q", rows)
 	}
 	zero := 0.0
 	rows = barPlot([]*float64{&zero, nil, &zero}, 2, 0)
-	if rows[0] != "   " || rows[1] != "─ ─" {
+	if rows[0] != "   " || rows[1] != "▁ ▁" {
 		t.Fatalf("a flat zero trend became missing data or a filled bar: %q", rows)
 	}
 	rows = barPlot([]*float64{&zero, &zero, &zero}, 2, 0)
-	if rows[1] != "───" {
+	if rows[1] != "▁▁▁" {
 		t.Fatalf("adjacent measured zeroes should form a continuous baseline, got %q", rows[1])
 	}
 }
@@ -85,8 +85,8 @@ func TestOverviewMeasuredZeroUsesConnectedThinBaseline(t *testing.T) {
 	m := testDashboard(t)
 	m.snapshot.History = []metrics.Sample{{ObservedAt: time.Now(), Values: map[string]float64{"cpu_percent": 0}}}
 	rows := m.spark("cpu_percent", 3, cyan)
-	if got := ansi.Strip(rows[len(rows)-1]); got != "  ─" {
-		t.Fatalf("zero baseline should be one thin connected line, got %q", got)
+	if got := ansi.Strip(rows[len(rows)-1]); got != "  ▁" {
+		t.Fatalf("zero baseline should be a thin bottom-aligned block, got %q", got)
 	}
 }
 
@@ -128,15 +128,16 @@ func TestAllTrendLevelsUseClassicWindowsConsoleGlyphs(t *testing.T) {
 					t.Fatalf("chart width changed: %q", row)
 				}
 				for _, glyph := range ansi.Strip(row) {
-					if !strings.ContainsRune(" █▄─", glyph) {
+					if !strings.ContainsRune(" █▄▁", glyph) {
 						t.Fatalf("chart uses a glyph unsupported by classic Windows fonts: %U", glyph)
 					}
 				}
 			}
-			// Detailed Host plots must not reintroduce the same fractional glyphs.
+			// Host plots may use the lower block for zero, but not intermediate
+			// fractional heights that can render inconsistently in classic consoles.
 			plot := ansi.Strip(strings.Join(m.trendPanel("CPU history", "cpu_percent", cyan, 48), "\n"))
-			if strings.ContainsAny(plot, "▁▂▃▅▆▇") {
-				t.Fatal("Host history still uses unsupported fractional blocks")
+			if strings.ContainsAny(plot, "▂▃▅▆▇") {
+				t.Fatal("Host history uses an unsupported intermediate fractional block")
 			}
 		}
 	}

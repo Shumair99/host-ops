@@ -2,6 +2,8 @@
 
 ## Install the latest release
 
+**Not published yet:** the commands below become available once the GitHub repository is public, the installer scripts are on `main`, and the first downloadable release has been published.
+
 Windows PowerShell:
 
 ```powershell

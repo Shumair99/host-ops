@@ -57,3 +57,17 @@ func TestPartiallyResolvedSiteCannotBeHealthy(t *testing.T) {
 		t.Fatal("a missing backend was concealed by a working backend")
 	}
 }
+
+func TestDiscoveredReportRetainsHardeningEvidenceAndSocketMounts(t *testing.T) {
+	w := discovery.Workload{ID: "w", Type: "docker", SourceID: "runtime", Name: "app", Status: "running", PostureObserved: true, User: "1000:1000", MemoryLimit: 536870912, ReadOnly: true, Privileged: true, Mounts: []discovery.Mount{{Source: "/var/run/docker.sock", Destination: "/var/run/docker.sock"}}}
+	registry := discovery.Registry{Sites: []discovery.Site{{Domain: "example.com", WorkloadIDs: []string{"w"}}}, Snapshot: discovery.Snapshot{Workloads: []discovery.Workload{w}, Sources: []discovery.Source{{ID: "runtime", State: "ready"}}}}
+	c := config.Config{Sites: []config.Site{{ID: "site", Proxy: config.Proxy{Domain: "example.com"}, Runtime: config.Runtime{Type: "docker", Container: "app"}}}}
+	r := baseReports(c, registry, nil)[0].Runtime
+	if !r.PostureObserved || r.User != w.User || r.MemoryLimit != w.MemoryLimit || !r.ReadOnly || !r.Privileged || len(r.Mounts) != 1 || r.Mounts[0].Destination != "/var/run/docker.sock" {
+		t.Fatal("discovery lost security evidence", r)
+	}
+	registry.Snapshot.Sources[0].State = "unavailable"
+	if r = baseReports(c, registry, nil)[0].Runtime; r.PostureObserved {
+		t.Fatal("retained metadata from an unavailable source was treated as observed")
+	}
+}

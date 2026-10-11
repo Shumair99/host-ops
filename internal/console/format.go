@@ -178,14 +178,18 @@ func Format(kind string, value any) []string {
 		add("No files, images, logs or volumes were removed.")
 	case []readiness.Assessment:
 		for _, a := range v {
-			add("%s  READINESS %d/%d", a.Name, a.Score, a.MaxScore)
+			percent := 0.0
+			if a.MaxScore > 0 {
+				percent = float64(a.Score) / float64(a.MaxScore) * 100
+			}
+			add("%s  EVIDENCE COVERAGE %.0f%% (%d/%d applicable points)", a.Name, percent, a.Score, a.MaxScore)
 			if a.Provisional {
 				add("PROVISIONAL: missing evidence earns no points.")
 			}
 			for _, rule := range a.Rules {
 				add("[%s] %s (%d/%d)", strings.ToUpper(string(rule.State)), rule.Title, rule.Points, rule.MaxPoints)
 				add("  %s", rule.Evidence)
-				if rule.State != "pass" {
+				if rule.State != "pass" && rule.State != "skip" {
 					add("  Next: %s", rule.Investigation)
 				}
 			}
@@ -221,6 +225,7 @@ func Format(kind string, value any) []string {
 			break
 		}
 		add("MONTHLY HOST COST: %s", Money(v.TotalCost, v.Currency))
+		add("The hosting bill covers the whole server; usage estimates are not billing discounts.")
 		if v.Billing != nil {
 			add("Source: %s / %s | %s", v.Billing.Provider, v.Billing.Source, At(v.Billing.ObservedAt))
 			if v.Billing.Plan != "" {
@@ -230,20 +235,41 @@ func Format(kind string, value any) []string {
 				add("Server-only month-to-date estimate: %s", Money(v.Billing.ServerMonthToDate, v.Currency))
 			}
 		}
+		usagePercent := func(n *float64) string {
+			if n == nil {
+				return "UNKNOWN"
+			}
+			return fmt.Sprintf("%.1f%%", *n*100)
+		}
+		add("Host capacity used: CPU %s | RAM %s | weighted %s", usagePercent(v.HostCPUUsage), usagePercent(v.HostMemoryUsage), usagePercent(v.CapacityUsage))
+		add("Measured site use: %s (%d/%d workloads)", Money(v.SiteCost, v.Currency), v.MeasuredSites, len(v.Sites))
+		if v.OtherCost != nil {
+			add("Shared / unmeasured usage: %s", Money(v.OtherCost, v.Currency))
+		} else if v.UnallocatedCost != nil {
+			add("Unassigned budget: %s (includes shared usage and spare capacity)", Money(v.UnallocatedCost, v.Currency))
+		}
+		add("Unused capacity: %s", Money(v.UnusedCost, v.Currency))
+		if v.HostSamples > 0 {
+			add("Recent window: %s to %s | %d host samples", At(v.WindowStart), At(v.WindowEnd), v.HostSamples)
+		}
 		fees := false
 		for _, site := range v.Sites {
 			fees = fees || site.Revenue != nil
 		}
 		if fees {
-			add("%-20s %-15s %-15s %s", "SITE", "ALLOCATED COST", "HOSTING FEE", "MARGIN")
+			add("%-20s %-15s %-15s %s", "SITE", "USAGE COST", "HOSTING FEE", "MARGIN")
 		} else {
-			add("%-20s %s", "SITE", "ESTIMATED ALLOCATION")
+			add("%-20s %s", "SITE", "ESTIMATED USAGE COST")
 		}
 		for _, s := range v.Sites {
 			if fees {
 				add("%-20s %-15s %-15s %s", s.Name, Money(s.Cost, v.Currency), Money(s.Revenue, v.Currency), Money(s.Margin, v.Currency))
 			} else {
 				add("%-20s %s", s.Name, Money(s.Cost, v.Currency))
+			}
+			add("  Host capacity: CPU %s | RAM %s | weighted %s", usagePercent(s.CPUshare), usagePercent(s.MemoryShare), usagePercent(s.CapacityUsage))
+			if len(s.SiteIDs) > 1 {
+				add("  Shared workload: %d addresses, counted once.", len(s.SiteIDs))
 			}
 			if s.NoisyNeighbour {
 				add("  Review disproportionate memory consumption.")
@@ -254,7 +280,7 @@ func Format(kind string, value any) []string {
 		}
 		add("")
 		add("%s", v.Formula)
-		add("Weights: equal %.2f memory %.2f CPU %.2f", v.Weights.Equal, v.Weights.Memory, v.Weights.CPU)
+		add("Usage weights: memory %.2f CPU %.2f", v.Weights.Memory, v.Weights.CPU)
 		for _, n := range v.Notes {
 			add("%s", n)
 		}

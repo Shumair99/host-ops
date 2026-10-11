@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+	"runtime"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -77,18 +78,42 @@ func setPrivateACL(path, sid string) error {
 }
 
 func privateACL(sddl, sid string) bool {
-	if !strings.Contains(sddl, "D:") || len(strings.Split(sddl, "(")) < 2 {
+	sd, err := windows.SecurityDescriptorFromString(sddl)
+	if err != nil {
 		return false
 	}
-	for _, part := range strings.Split(sddl, "(")[1:] {
-		ace := strings.Split(strings.SplitN(part, ")", 2)[0], ";")
-		if len(ace) != 6 {
+	defer runtime.KeepAlive(sd)
+	acl, _, err := sd.DACL()
+	if err != nil || acl == nil || acl.AceCount == 0 {
+		return false
+	}
+	user, err := windows.StringToSid(sid)
+	if err != nil {
+		return false
+	}
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		return false
+	}
+	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		return false
+	}
+	for i := uint32(0); i < uint32(acl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(acl, i, &ace); err != nil || ace == nil {
 			return false
 		}
-		if ace[0] == "D" {
+		if ace.Header.AceType == windows.ACCESS_DENIED_ACE_TYPE {
 			continue
 		}
-		if ace[0] != "A" || (ace[5] != sid && ace[5] != "SY" && ace[5] != "BA") {
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			return false
+		}
+		// The Windows parser resolves aliases such as LA and SY to real SIDs.
+		// SidStart is the first word of the variable-length SID in this ACE.
+		trustee := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if !trustee.Equals(user) && !trustee.Equals(system) && !trustee.Equals(admins) {
 			return false
 		}
 	}

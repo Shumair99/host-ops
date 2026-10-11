@@ -27,7 +27,8 @@ func TestStreamCanOmitHostSamplingWhileKeepingInventory(t *testing.T) {
 			if err := json.NewEncoder(inW).Encode(Request{Version: discovery.ProtocolVersion, Host: config.Host{ID: "h"}, SkipHostMetrics: skip}); err != nil {
 				t.Fatal(err)
 			}
-			inventory, metrics := false, 0
+			inventory, metrics, workloads := false, 0, 0
+			inventoryPending, workloadPending := false, false
 			decoder := json.NewDecoder(outR)
 			for {
 				var frame Message
@@ -35,7 +36,22 @@ func TestStreamCanOmitHostSamplingWhileKeepingInventory(t *testing.T) {
 					break
 				}
 				if frame.Kind == "inventory" {
+					if !inventoryPending {
+						t.Fatal("inventory arrived without announcing the pending scan")
+					}
 					inventory = true
+				}
+				if frame.Kind == "inventory_pending" {
+					inventoryPending = true
+				}
+				if frame.Kind == "workload_pending" {
+					workloadPending = true
+				}
+				if frame.Kind == "workload_metrics" {
+					if !workloadPending {
+						t.Fatal("workload batch arrived without announcing loading")
+					}
+					workloads++
 				}
 				if frame.Kind == "host_metrics" {
 					metrics++
@@ -46,8 +62,8 @@ func TestStreamCanOmitHostSamplingWhileKeepingInventory(t *testing.T) {
 			}
 			outR.Close()
 			inR.Close()
-			if !inventory || (skip && metrics != 0) || (!skip && metrics == 0) {
-				t.Fatalf("inventory=%v host frames=%d skip=%v", inventory, metrics, skip)
+			if !inventory || workloads == 0 || (skip && metrics != 0) || (!skip && metrics == 0) {
+				t.Fatalf("inventory=%v host frames=%d workload batches=%d skip=%v", inventory, metrics, workloads, skip)
 			}
 		})
 	}

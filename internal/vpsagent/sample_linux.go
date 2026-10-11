@@ -119,7 +119,8 @@ func (s *Sampler) Sample(ctx context.Context) metrics.Sample {
 	} else {
 		sample.Unavailable = append(sample.Unavailable, "uptime")
 	}
-	if data, err := os.ReadFile("/proc/loadavg"); err == nil {
+	loadData, loadErr := os.ReadFile("/proc/loadavg")
+	if data, err := loadData, loadErr; err == nil {
 		fields := strings.Fields(string(data))
 		if len(fields) >= 3 {
 			for i, key := range []string{"load_1", "load_5", "load_15"} {
@@ -137,6 +138,8 @@ func (s *Sampler) Sample(ctx context.Context) metrics.Sample {
 		sample.Unavailable = append(sample.Unavailable, "load")
 	}
 
+	statData, _ := os.ReadFile("/proc/stat")
+	metrics.KernelExtras(&sample, statData, memData, loadData, os.ReadFile)
 	if s.diskAt.IsZero() || observed.Sub(s.diskAt) >= 30*time.Second {
 		s.diskValues = rootDisk()
 		if len(s.diskValues) > 0 {

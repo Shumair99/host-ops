@@ -60,6 +60,12 @@ func bundledAsset(relative string) string {
 	if err != nil {
 		return ""
 	}
+	// Unix installers expose symlinks in ~/.local/bin; assets live beside the
+	// actual versioned executable, including on macOS where Executable may
+	// report the path used to launch it.
+	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
+		executable = resolved
+	}
 	name := filepath.Join(filepath.Dir(executable), filepath.FromSlash(relative))
 	if regularFile(name) {
 		return name

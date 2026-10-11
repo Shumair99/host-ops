@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/Shumair99/host-ops/internal/metrics"
@@ -52,10 +53,19 @@ var allowedValues = map[string]struct{}{
 	"load_1": {}, "load_5": {}, "load_15": {}, "disk_total_bytes": {},
 	"disk_used_bytes": {}, "disk_free_bytes": {}, "disk_percent": {},
 	"disk_reserved_bytes": {},
+	"cpu_count":           {}, "tasks_running": {}, "tasks_blocked": {}, "tasks_total": {},
+	"memory_available_bytes": {}, "memory_cached_bytes": {}, "swap_total_bytes": {},
+	"network_rx_bytes": {}, "network_tx_bytes": {}, "network_interfaces": {},
+	"network_interface_identity": {},
+	"network_rx_packets":         {}, "network_tx_packets": {}, "network_rx_errors": {}, "network_tx_errors": {}, "network_rx_dropped": {}, "network_tx_dropped": {},
+	"pressure_cpu_some_percent": {}, "pressure_cpu_full_percent": {},
+	"pressure_memory_some_percent": {}, "pressure_memory_full_percent": {},
+	"pressure_io_some_percent": {}, "pressure_io_full_percent": {},
 }
 
 var allowedUnavailable = map[string]struct{}{
 	"cpu": {}, "memory": {}, "uptime": {}, "load": {}, "disk": {},
+	"pressure": {}, "network": {},
 }
 
 func ValidateRequest(r Request, hostID string) error {
@@ -79,7 +89,7 @@ func ValidateSample(s metrics.Sample, hostID string, now time.Time) error {
 		if _, ok := allowedValues[key]; !ok || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 1e18 {
 			return fmt.Errorf("collector sample value rejected")
 		}
-		if (key == "cpu_percent" || key == "memory_percent" || key == "disk_percent") && value > 100 {
+		if strings.HasSuffix(key, "_percent") && value > 100 {
 			return fmt.Errorf("collector sample percentage rejected")
 		}
 	}

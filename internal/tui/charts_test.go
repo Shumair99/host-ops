@@ -173,3 +173,38 @@ func TestOverviewExcludesOldAndFutureSamples(t *testing.T) {
 		t.Fatal("recent sample lost", buckets)
 	}
 }
+
+func TestRetainedHistoryStaysStillAcrossClockAndLiveTelemetryChanges(t *testing.T) {
+	m := testDashboard(t)
+	m.theme.color = true
+	end := time.Now().Add(-2 * time.Second)
+	m.snapshot.History = []metrics.Sample{{ObservedAt: end.Add(-30 * time.Second), Values: map[string]float64{"cpu_percent": 10}}, {ObservedAt: end, Values: map[string]float64{"cpu_percent": 20}}}
+	m.snapshot.Host = metrics.Sample{ObservedAt: time.Now(), Values: map[string]float64{"cpu_percent": 35}}
+	before := m.signalPanel("CPU", "cpu_percent", "%", cyan, 100, m.hostHistory(), value(m.snapshot.Host.Values, "cpu_percent"), 60, 4)
+	canvas := m.resourceCanvas(60)
+	m.snapshot.Host = metrics.Sample{ObservedAt: time.Now().Add(time.Second), Values: map[string]float64{"cpu_percent": 99}}
+	after := m.signalPanel("CPU", "cpu_percent", "%", cyan, 100, m.hostHistory(), value(m.snapshot.Host.Values, "cpu_percent"), 60, 4)
+	if before[1] == after[1] || strings.Join(before[2:], "\n") != strings.Join(after[2:], "\n") {
+		t.Fatal("live numbers failed to update or repainted retained bars", before, after)
+	}
+	newCanvas := m.resourceCanvas(60)
+	if strings.Join(canvas[2:5], "\n") != strings.Join(newCanvas[2:5], "\n") {
+		t.Fatal("live threshold recolored historical observations")
+	}
+	if len(m.hostHistory()) != 2 {
+		t.Fatal("one-second live reading entered retained chart history")
+	}
+	windowBefore := retainedWindowEnd(m.snapshot.History, end.Add(time.Second))
+	windowAfter := retainedWindowEnd(m.snapshot.History, end.Add(4*time.Minute))
+	if !windowBefore.Equal(windowAfter) || !sameBuckets(recentBuckets(m.snapshot.History, "cpu_percent", 10, windowBefore), recentBuckets(m.snapshot.History, "cpu_percent", 10, windowAfter)) {
+		t.Fatal("clock-only redraw shifted the latest saved bar")
+	}
+	m.snapshot.History = append(m.snapshot.History, metrics.Sample{ObservedAt: end.Add(4 * time.Minute), Values: map[string]float64{"cpu_percent": 60}})
+	nextWindow := retainedWindowEnd(m.snapshot.History, end.Add(5*time.Minute))
+	if nextWindow.Equal(windowBefore) || sameBuckets(recentBuckets(m.snapshot.History, "cpu_percent", 10, windowBefore), recentBuckets(m.snapshot.History, "cpu_percent", 10, nextWindow)) {
+		t.Fatal("new retained sample did not advance the chart")
+	}
+	if got := retainedWindowEnd(m.snapshot.History, end.Add(time.Hour)); !got.Equal(end.Add(time.Hour)) {
+		t.Fatal("expired history window was presented as current")
+	}
+}

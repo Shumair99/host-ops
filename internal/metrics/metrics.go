@@ -71,7 +71,8 @@ func hostSample(ctx context.Context, runner platform.Runner, h config.Host, disk
 		s.Values["cpu_percent"] = 100 * (1 - (bi-ai)/(b-a))
 	}
 	mem := map[string]float64{}
-	for _, line := range strings.Split(string(get("memory", "/proc/meminfo")), "\n") {
+	memData := get("memory", "/proc/meminfo")
+	for _, line := range strings.Split(string(memData), "\n") {
 		f := strings.Fields(line)
 		if len(f) >= 2 {
 			n, _ := strconv.ParseFloat(f[1], 64)
@@ -87,11 +88,13 @@ func hostSample(ctx context.Context, runner platform.Runner, h config.Host, disk
 	if fields := strings.Fields(string(get("uptime", "/proc/uptime"))); len(fields) > 0 {
 		s.Values["uptime_seconds"], _ = strconv.ParseFloat(fields[0], 64)
 	}
-	if fields := strings.Fields(string(get("load", "/proc/loadavg"))); len(fields) >= 3 {
+	loadData := get("load", "/proc/loadavg")
+	if fields := strings.Fields(string(loadData)); len(fields) >= 3 {
 		s.Values["load_1"], _ = strconv.ParseFloat(fields[0], 64)
 		s.Values["load_5"], _ = strconv.ParseFloat(fields[1], 64)
 		s.Values["load_15"], _ = strconv.ParseFloat(fields[2], 64)
 	}
+	KernelExtras(&s, after, memData, loadData, func(path string) ([]byte, error) { return runner.Run(ctx, "cat", path) })
 	if !disk {
 		return s
 	}

@@ -23,6 +23,7 @@ type Connection struct {
 	Connected  bool      `json:"connected"`
 	ObservedAt time.Time `json:"observed_at"`
 	Issue      string    `json:"issue,omitempty"`
+	Pending    []string  `json:"pending,omitempty"`
 }
 type publicResult struct {
 	checks    map[string][]model.Check
@@ -40,8 +41,8 @@ func ResolveConfig(ctx context.Context, c config.Config, store *storage.Store) (
 	return discovery.ConfigSites(registry, c), nil
 }
 
-func connection(ctx context.Context, store *storage.Store, host string, connected bool, issue string) error {
-	return store.Transition(ctx, host, "", "connection", Connection{connected, time.Now().UTC(), issue}, "", time.Now(), nil)
+func connection(ctx context.Context, store *storage.Store, host string, connected bool, issue string, pending ...string) error {
+	return store.Transition(ctx, host, "", "connection", Connection{Connected: connected, ObservedAt: time.Now().UTC(), Issue: issue, Pending: pending}, "", time.Now(), nil)
 }
 
 func baseReports(c config.Config, registry discovery.Registry, public map[string][]model.Check) []model.Report {
@@ -97,6 +98,14 @@ func baseReports(c config.Config, registry discovery.Registry, public map[string
 				r.Runtime.ImageID, r.Runtime.RestartCount, r.Runtime.StartedAt = w.ImageID, w.RestartCount, w.StartedAt
 				r.Runtime.Commit = w.Revision
 				r.Runtime.RestartPolicy = w.RestartPolicy
+				r.Runtime.PostureObserved = w.PostureObserved && sources[w.SourceID].State == "ready"
+				if sources[w.SourceID].State == "ready" {
+					r.Runtime.Processes = w.Processes
+				}
+				r.Runtime.User, r.Runtime.Privileged, r.Runtime.ReadOnly, r.Runtime.MemoryLimit = w.User, w.Privileged, w.ReadOnly, w.MemoryLimit
+				for _, mount := range w.Mounts {
+					r.Runtime.Mounts = append(r.Runtime.Mounts, model.Mount{Source: mount.Source, Destination: mount.Destination})
+				}
 				r.Runtime.IPs = map[string]string{}
 				for n, net := range w.Networks {
 					r.Runtime.IPs[n] = net.IP
@@ -184,12 +193,13 @@ func probePublic(ctx context.Context, c config.Config, cached map[string][]model
 				at = time.Now()
 			} else {
 				for _, check := range cached[s.ID] {
-					if check.Layer != "public_http" {
+					if check.Layer != "public_http" && check.Layer != "registration" {
 						checks = append(checks, check)
 					}
 				}
 			}
 			checks = append(checks, health.HTTP(ctx, s, s.Health.PublicURL, "public_http"))
+			checks = health.EnrichRegistration(ctx, s, checks)
 			mu.Lock()
 			result.checks[s.ID], result.networkAt[s.ID] = checks, at
 			mu.Unlock()
@@ -301,7 +311,7 @@ func RunLive(ctx context.Context, c config.Config, store *storage.Store, interva
 	if interval < 5*time.Second {
 		return fmt.Errorf("public check interval must be at least 5s")
 	}
-	if err := connection(ctx, store, c.Host.ID, false, "Connecting to collector"); err != nil {
+	if err := connection(ctx, store, c.Host.ID, false, "Connecting to collector", "connection"); err != nil {
 		return err
 	}
 	path := ""
@@ -401,9 +411,13 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 	lastHistory := time.Time{}
 	lastWorkloadHistory := time.Time{}
 	lastRetain := time.Time{}
-	launch := func() {
+	progress := newStreamProgress(ctx, store, c.Host.ID)
+	launch := func() error {
 		if busy || len(resolved.Sites) == 0 {
-			return
+			return nil
+		}
+		if err := progress.set("public_checks", true); err != nil {
+			return err
 		}
 		busy = true
 		current := resolved
@@ -416,6 +430,7 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 			case <-ctx.Done():
 			}
 		}()
+		return nil
 	}
 	for {
 		select {
@@ -427,20 +442,35 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 			if err := session.Refresh(); err != nil {
 				return err
 			}
-			launch()
+			if err := launch(); err != nil {
+				return err
+			}
 		case <-ticker.C:
-			launch()
+			if err := launch(); err != nil {
+				return err
+			}
 		case result := <-results:
 			busy = false
 			public, networkAt = result.checks, result.networkAt
 			if err := persistReports(ctx, resolved, store, baseReports(resolved, registry, public)); err != nil {
 				return err
 			}
+			if err := progress.set("public_checks", false); err != nil {
+				return err
+			}
 		case frame := <-frames:
 			message := frame.message
 			switch message.Kind {
 			case "hello":
-				if err := connection(ctx, store, c.Host.ID, true, ""); err != nil {
+				if err := progress.ready(); err != nil {
+					return err
+				}
+			case "inventory_pending", "workload_pending":
+				stage := "inventory"
+				if message.Kind == "workload_pending" {
+					stage = "workload_metrics"
+				}
+				if err := progress.set(stage, true); err != nil {
 					return err
 				}
 			case "inventory":
@@ -455,7 +485,12 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 				if err = refreshReports(ctx, resolved, store, baseReports(resolved, registry, public)); err != nil {
 					return err
 				}
-				launch()
+				if err = launch(); err != nil {
+					return err
+				}
+				if err = progress.set("inventory", false); err != nil {
+					return err
+				}
 			case "host_metrics":
 				if frame.source == "collector" && c.Host.HistoryMode == "continuous" {
 					// The collector is asked to suppress this stream in continuous
@@ -475,6 +510,9 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 					}
 					lastHistory = time.Now()
 				}
+				if err = progress.set("host_metrics", false); err != nil {
+					return err
+				}
 			case "history":
 				if frame.source != "persistent" || len(message.Samples) > 128 {
 					return fmt.Errorf("invalid persistent host history")
@@ -492,6 +530,9 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 					if err = store.Transition(ctx, c.Host.ID, "", "host_metrics", latest, "", latest.ObservedAt, nil); err != nil {
 						return err
 					}
+					if err = progress.set("host_metrics", false); err != nil {
+						return err
+					}
 				}
 			case "workload_metrics":
 				historyDue := time.Since(lastWorkloadHistory) >= 15*time.Second
@@ -507,6 +548,9 @@ func stream(parent context.Context, c config.Config, store *storage.Store, path 
 				}
 				if historyDue {
 					lastWorkloadHistory = time.Now()
+				}
+				if err = progress.set("workload_metrics", false); err != nil {
+					return err
 				}
 			}
 			if time.Since(lastRetain) >= time.Minute {

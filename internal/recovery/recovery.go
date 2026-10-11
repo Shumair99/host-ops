@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/discovery"
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/storage"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -82,19 +84,22 @@ func (r Restore) Validate(now time.Time) error {
 }
 
 type Assessment struct {
-	HostID       string      `json:"host_id"`
-	SiteID       string      `json:"site_id"`
-	Name         string      `json:"name"`
-	RPOhours     int         `json:"rpo_target_hours"`
-	RTOminutes   int         `json:"rto_target_minutes"`
-	BackupState  model.State `json:"backup_state"`
-	RestoreState model.State `json:"restore_state"`
-	RPOstate     model.State `json:"rpo_state"`
-	RTOstate     model.State `json:"rto_state"`
-	LastBackup   *Backup     `json:"last_backup"`
-	LastRestore  *Restore    `json:"last_restore"`
-	Confidence   string      `json:"confidence"`
-	Notes        []string    `json:"notes"`
+	HostID          string                     `json:"host_id"`
+	SiteID          string                     `json:"site_id"`
+	Name            string                     `json:"name"`
+	RPOhours        int                        `json:"rpo_target_hours"`
+	RTOminutes      int                        `json:"rto_target_minutes"`
+	BackupState     model.State                `json:"backup_state"`
+	RestoreState    model.State                `json:"restore_state"`
+	RPOstate        model.State                `json:"rpo_state"`
+	RTOstate        model.State                `json:"rto_state"`
+	LastBackup      *Backup                    `json:"last_backup"`
+	LastRestore     *Restore                   `json:"last_restore"`
+	Confidence      string                     `json:"confidence"`
+	Notes           []string                   `json:"notes"`
+	Artifacts       []discovery.BackupArtifact `json:"artifacts,omitempty"`
+	DiscoveryAt     time.Time                  `json:"discovery_at,omitempty"`
+	DiscoveryIssues []string                   `json:"discovery_issues,omitempty"`
 }
 
 func Evaluate(site config.Site, backup *Backup, restore *Restore, now time.Time) Assessment {
@@ -157,5 +162,68 @@ func Assess(ctx context.Context, c config.Config, site config.Site, store *stora
 			return Assessment{}, err
 		}
 	}
-	return Evaluate(site, backup, restore, time.Now()), nil
+	reg, err := store.Inventory(ctx, c.Host.ID)
+	if err != nil {
+		return Assessment{}, err
+	}
+	now := time.Now()
+	if model.Fresh(reg.Snapshot.ObservedAt, now, model.DefaultMaxAge) {
+		for _, report := range reg.Snapshot.RecoveryReports {
+			matches := false
+			for _, domain := range report.Domains {
+				matches = matches || strings.EqualFold(domain, site.Proxy.Domain)
+			}
+			if !matches {
+				continue
+			}
+			if report.Kind == "backup" {
+				var b Backup
+				if json.Unmarshal(report.Record, &b) != nil {
+					continue
+				}
+				b.SiteID = site.ID
+				b.HostID = c.Host.ID
+				b.Origin = "automatic-job-report"
+				if b.Validate(now) == nil && (backup == nil || b.CompletedAt.After(backup.CompletedAt)) {
+					backup = &b
+				}
+			} else if report.Kind == "restore" {
+				var r Restore
+				if json.Unmarshal(report.Record, &r) != nil {
+					continue
+				}
+				r.SiteID = site.ID
+				r.HostID = c.Host.ID
+				r.Origin = "automatic-job-report"
+				if r.Validate(now) == nil && (restore == nil || r.CompletedAt.After(restore.CompletedAt)) {
+					restore = &r
+				}
+			}
+		}
+	}
+	a := Evaluate(site, backup, restore, now)
+	a.DiscoveryAt = reg.Snapshot.ObservedAt
+	for _, artifact := range reg.Snapshot.BackupArtifacts {
+		if artifact.Container == site.Runtime.Container && artifact.Container != "" {
+			a.Artifacts = append(a.Artifacts, artifact)
+		}
+	}
+	if len(a.Artifacts) > 0 {
+		if a.LastBackup == nil {
+			a.BackupState = model.Warn
+			if a.Confidence == "unverified" {
+				a.Confidence = "artifact_detected"
+			}
+		}
+		a.Notes = append(a.Notes, "Local backup artifacts detected automatically. File modification times do not prove a completed consistent backup or successful restore.")
+	}
+	if !reg.Snapshot.ObservedAt.IsZero() && !model.Fresh(reg.Snapshot.ObservedAt, now, model.DefaultMaxAge) {
+		a.DiscoveryIssues = append(a.DiscoveryIssues, "Backup artifact scan is retained and stale")
+	}
+	for _, issue := range reg.Snapshot.BackupIssues {
+		if strings.HasPrefix(issue, site.Runtime.Container+":") || strings.HasPrefix(issue, "Automatic") || strings.HasPrefix(issue, "Invalid recovery") || strings.HasPrefix(issue, "Recovery report") {
+			a.DiscoveryIssues = append(a.DiscoveryIssues, issue)
+		}
+	}
+	return a, nil
 }

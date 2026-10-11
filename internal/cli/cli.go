@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Shumair99/host-ops/internal/agent"
+	"github.com/Shumair99/host-ops/internal/buildinfo"
 	"github.com/Shumair99/host-ops/internal/collector"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/console"
@@ -38,7 +39,8 @@ Commands:
   agent status      Check the VPS history service
   agent uninstall   Remove the VPS service and its retained history
   discover          Refresh and explain the automatic inventory
-  dashboard         Open the terminal monitoring dashboard (default)
+  dashboard         Open the terminal monitoring dashboard
+  export-ai         Save all monitoring views and an AI review prompt as Markdown
   sites             Refresh and list automatically discovered sites
   record <kind>     Import deployment/backup/restore/observations (--file FILE)
   status [site]     Inspect runtime health
@@ -64,7 +66,7 @@ Commands:
   impact <resource> Simulate the registered dependency blast radius
 
 Options:
-  --config FILE     Manifest (default: HOSTOPS_CONFIG or hostops.json)
+  --config FILE     Settings (default: per-user profile; existing project settings work)
   --json            Machine-readable output
 
   --db FILE         Local SQLite history (default: private per-user cache)
@@ -72,6 +74,7 @@ Options:
   --history         Read saved metrics without a remote probe (metrics command)
   --resolution MODE Saved metric detail: auto, raw, 5m, 30m
   --file FILE       Evidence JSON; use - for standard input
+  --output FILE     Markdown destination (export-ai command)
   --demo            Offline fictional dashboard; no network access
   --once            Print one dashboard frame and exit
   --no-collect      Disable automatic cycles; inspection views still read live
@@ -86,14 +89,18 @@ func Run(ctx context.Context, args []string, out, errOut io.Writer) int {
 	return RunWithInput(ctx, args, os.Stdin, out, errOut)
 }
 func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errOut io.Writer) int {
+	if len(args) > 0 && (args[0] == "--version" || strings.EqualFold(args[0], "version")) {
+		fmt.Fprintln(out, buildinfo.String())
+		return 0
+	}
 	if len(args) > 0 && (args[0] == "help" || args[0] == "--help") {
 		fmt.Fprint(out, Help)
 		return 0
 	}
 	if len(args) == 0 {
-		args = []string{"dashboard"}
+		args = []string{"start"}
 	}
-	command := args[0]
+	command := strings.ToLower(args[0])
 	if command == "start" {
 		return startCommand(ctx, args[1:], input, out, errOut)
 	}
@@ -109,6 +116,9 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	if command == "billing" {
 		return billingCommand(ctx, args[1:], out, errOut)
 	}
+	if command == "export-ai" {
+		return exportAICommand(ctx, args[1:], out, errOut)
+	}
 	if command == "collect" {
 		if err := collector.Serve(ctx, input, out); err != nil {
 			fmt.Fprintln(errOut, err)
@@ -122,16 +132,7 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 	}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	flags.SetOutput(errOut)
-	defaultPath := os.Getenv("HOSTOPS_CONFIG")
-	if defaultPath == "" {
-		defaultPath = "hostops.json"
-		if _, err := os.Stat(defaultPath); os.IsNotExist(err) {
-			if _, err = os.Stat("local/hostops.json"); err == nil {
-				defaultPath = "local/hostops.json"
-			}
-		}
-	}
-	path := flags.String("config", defaultPath, "site manifest")
+	path := flags.String("config", defaultConnectionConfig(), "site manifest")
 	asJSON := flags.Bool("json", false, "JSON output")
 	db := flags.String("db", "", "history database (default: private per-user cache)")
 	since := flags.String("since", "24h", "history window")
@@ -190,7 +191,7 @@ func RunWithInput(ctx context.Context, args []string, input io.Reader, out, errO
 				return 1
 			}
 		}
-		err = tui.Run(ctx, c, *db, tui.Options{Interval: *interval, Demo: *demo, Once: *once, NoCollect: *noCollect, Page: *page, Color: *color}, input, out)
+		err = tui.Run(ctx, c, *db, tui.Options{Interval: *interval, Demo: *demo, Once: *once, NoCollect: *noCollect, Page: *page, Color: *color, ConfigPath: *path}, input, out)
 		if err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1

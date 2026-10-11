@@ -26,6 +26,7 @@ func Collect(ctx context.Context, c config.Config, s config.Site, runner platfor
 	}
 	checks = append(checks, Network(ctx, s)...)
 	checks = append(checks, HTTP(ctx, s, s.Health.PublicURL, "public_http"))
+	checks = EnrichRegistration(ctx, s, checks)
 	report := model.Report{HostID: s.HostID, SiteID: s.ID, Name: s.Name, ObservedAt: time.Now().UTC(), Vantage: vantage, Runtime: r, Checks: checks, Overall: model.Overall(checks)}
 	report.Diagnoses = diagnostics.Diagnose(report)
 	return report

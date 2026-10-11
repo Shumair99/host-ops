@@ -12,7 +12,6 @@ Ownership comes from discovered backend mounts, observed document roots and conf
 
 A SQLite lease prevents overlapping scans from dashboard processes using the same host/history database. The lease expires after a crash; canceled remote walks remain bounded by timeout. A failed inspection retains the previous index and retries after five minutes. Older shallow cache formats are refreshed automatically. Independent history databases do not share a lease.
 
-
 ## Local data and access
 
 Storage scans inspect metadata rather than file contents. Paths, sizes, domains and runtime facts are nevertheless operational data. The terminal and history are local; SSH transports observations from the server and public probes contact website endpoints. No central telemetry service or hosted dashboard receives this evidence. Optional provider API reads and configured watcher destinations have their own documented network boundaries.

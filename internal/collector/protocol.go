@@ -116,6 +116,9 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 		defer timer.Stop()
 		scanHost := c.Host
 		for {
+			if !send(Message{Kind: "inventory_pending"}) {
+				return
+			}
 			snapshot := Scan(ctx, scanHost)
 			scanHost = rememberServices(scanHost, snapshot)
 			inventoryMu.Lock()
@@ -146,10 +149,15 @@ func Serve(parent context.Context, input io.Reader, output io.Writer) error {
 			inventoryMu.RLock()
 			snapshot := latest
 			inventoryMu.RUnlock()
+			if !send(Message{Kind: "workload_pending"}) {
+				return
+			}
 			statsCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 			samples := workloadStats(statsCtx, platform.Command{Host: c.Host}, snapshot)
 			cancel()
-			if len(samples) > 0 && !send(Message{Kind: "workload_metrics", Samples: samples}) {
+			// An empty batch also marks completion, including hosts without any
+			// running containers. Unavailable evidence must not look like loading.
+			if !send(Message{Kind: "workload_metrics", Samples: samples}) {
 				return
 			}
 			select {

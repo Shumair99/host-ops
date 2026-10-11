@@ -47,6 +47,7 @@ func testDashboard(t *testing.T) dashboard {
 		t.Fatal(err)
 	}
 	m.loading = false
+	m.startupComplete = true
 	return m
 }
 func press(m dashboard, key string) (dashboard, tea.Cmd) {

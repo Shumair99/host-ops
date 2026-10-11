@@ -93,6 +93,7 @@ func ParseCaddy(data []byte, source, proxy string, networks []string) ([]Route, 
 		}
 	}
 	routes = func(list []any, parent caddyScope) {
+		remaining := append([]string(nil), parent.hosts...)
 		for _, value := range list {
 			route, ok := value.(map[string]any)
 			if !ok {
@@ -105,8 +106,14 @@ func ParseCaddy(data []byte, source, proxy string, networks []string) ([]Route, 
 			for _, m := range matches {
 				match, _ := m.(map[string]any)
 				scope := parent
+				if len(parent.hosts) > 0 {
+					scope.hosts = remaining
+					if len(remaining) == 0 {
+						continue
+					}
+				}
 				if hosts := stringArray(match["host"]); len(hosts) > 0 {
-					scope.hosts = intersectHosts(parent.hosts, hosts)
+					scope.hosts = intersectHosts(scope.hosts, hosts)
 					if len(scope.hosts) == 0 {
 						continue
 					}
@@ -121,6 +128,21 @@ func ParseCaddy(data []byte, source, proxy string, networks []string) ([]Route, 
 				}
 				if h, ok := route["handle"].([]any); ok {
 					handlers(h, scope)
+					// A host-only static redirect ends these requests. Later fallback
+					// routes must not give that address its own backend.
+					if len(parent.hosts) > 0 && len(match) == 1 && len(stringArray(match["host"])) > 0 && len(scope.paths) == 0 && directRedirect(h) {
+						next := []string{}
+						for _, host := range remaining {
+							consumed := false
+							for _, redirected := range scope.hosts {
+								consumed = consumed || host == redirected
+							}
+							if !consumed {
+								next = append(next, host)
+							}
+						}
+						remaining = next
+					}
 				}
 			}
 		}
@@ -152,6 +174,22 @@ func ParseCaddy(data []byte, source, proxy string, networks []string) ([]Route, 
 		}
 	}
 	return result, nil
+}
+
+func directRedirect(handlers []any) bool {
+	if len(handlers) != 1 {
+		return false
+	}
+	h, ok := handlers[0].(map[string]any)
+	if !ok || h["handler"] != "static_response" {
+		return false
+	}
+	headers, _ := h["headers"].(map[string]any)
+	if len(stringArray(headers["Location"])) == 0 {
+		return false
+	}
+	code := fmt.Sprint(h["status_code"])
+	return code == "301" || code == "302" || code == "303" || code == "307" || code == "308"
 }
 
 func array(value any) []any { list, _ := value.([]any); return list }

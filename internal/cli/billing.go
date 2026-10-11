@@ -6,8 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -30,14 +28,7 @@ func billingCommand(ctx context.Context, args []string, out, errOut io.Writer) i
 	}
 	flags := flag.NewFlagSet("billing", flag.ContinueOnError)
 	flags.SetOutput(errOut)
-	defaultConfig := os.Getenv("HOSTOPS_CONFIG")
-	if defaultConfig == "" {
-		defaultConfig = "local/hostops.json"
-		if _, err := os.Stat("hostops.json"); err == nil {
-			defaultConfig = "hostops.json"
-		}
-	}
-	file := flags.String("config", defaultConfig, "connection settings")
+	file := flags.String("config", defaultConnectionConfig(), "connection settings")
 	dbPath := flags.String("db", "", "local evidence database (default: private per-user cache)")
 	provider := flags.String("provider", "", "billing source")
 	resource := flags.String("resource", "", "exact provider server/subscription ID")
@@ -87,36 +78,9 @@ func billingCommand(ctx context.Context, args []string, out, errOut io.Writer) i
 		if *currency != "" {
 			c.Host.Currency = strings.ToUpper(*currency)
 		}
-		c.Host.Billing = b
-		if err = c.Validate(); err != nil {
+		_, err = config.SaveBilling(*file, c.Host.ID, b, c.Host.Currency)
+		if err != nil {
 			fmt.Fprintln(errOut, err)
-			return 1
-		}
-		data, err := json.MarshalIndent(c, "", "  ")
-		if err != nil {
-			fmt.Fprintln(errOut, "billing settings cannot be encoded")
-			return 1
-		}
-		// Publish a complete local manifest; no provider or VPS mutation occurs.
-		tmp, err := os.CreateTemp(filepath.Dir(*file), ".hostops-billing-*")
-		if err != nil {
-			fmt.Fprintln(errOut, "cannot save billing settings")
-			return 1
-		}
-		name := tmp.Name()
-		defer os.Remove(name)
-		if err = tmp.Chmod(0600); err == nil {
-			_, err = tmp.Write(append(data, '\n'))
-		}
-		closeErr := tmp.Close()
-		if err == nil {
-			err = closeErr
-		}
-		if err == nil {
-			err = os.Rename(name, *file)
-		}
-		if err != nil {
-			fmt.Fprintln(errOut, "cannot publish billing settings")
 			return 1
 		}
 		fmt.Fprintln(out, "Billing source saved. Restart the dashboard to load changed settings. API sources: run hostops billing sync to read and cache pricing.")

@@ -53,12 +53,32 @@ func TokenName(provider, override string) string {
 	return "HOSTOPS_" + strings.ToUpper(provider) + "_TOKEN"
 }
 
+type sessionTokenKey struct{ provider, name string }
+
+// WithSessionToken keeps credentials in this application's context only. They
+// are never added to a config, evidence record or child-process environment.
+func WithSessionToken(ctx context.Context, provider, env, token string) context.Context {
+	return context.WithValue(ctx, sessionTokenKey{provider, TokenName(provider, env)}, token)
+}
+
+func tokenValue(ctx context.Context, provider, env string) string {
+	name := TokenName(provider, env)
+	if token, ok := ctx.Value(sessionTokenKey{provider, name}).(string); ok {
+		return strings.TrimSpace(token)
+	}
+	return strings.TrimSpace(os.Getenv(name))
+}
+
+func TokenAvailable(ctx context.Context, provider, env string) bool {
+	return tokenValue(ctx, provider, env) != ""
+}
+
 func (c Client) get(ctx context.Context, provider, path, env string, out any) error {
 	base := map[string]string{"hetzner": "https://api.hetzner.cloud/v1", "hostinger": "https://developers.hostinger.com/api"}[provider]
 	if base == "" {
 		return fmt.Errorf("unsupported billing API")
 	}
-	token := strings.TrimSpace(os.Getenv(TokenName(provider, env)))
+	token := tokenValue(ctx, provider, env)
 	if token == "" {
 		return fmt.Errorf("set %s in this terminal to read provider billing", TokenName(provider, env))
 	}

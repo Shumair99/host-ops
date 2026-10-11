@@ -147,6 +147,11 @@ func (m dashboard) diskLines(w int) []string {
 		rows = append(rows, t.paint("Capacity sample "+ageLabel(time.Unix(int64(*at), 0)), muted))
 	}
 	out := t.panel("Root filesystem", rows, w)
+	if w >= 88 && m.snapshot.Disk != nil {
+		a := (w - 1) / 2
+		compact := []string{t.meter(n, max(1, a-14), metricColor(n, amber)) + " " + percent(n), "Used " + m.byteValue("disk_used_bytes"), "Free " + m.byteValue("disk_free_bytes"), "Capacity " + m.byteValue("disk_total_bytes")}
+		out = columns(t.panel("Root filesystem / current", compact, a), m.storageSignals(w-a-1), a, w-a-1)
+	}
 	disk := m.snapshot.Disk
 	if disk == nil {
 		state := "Waiting for automatic inspection"

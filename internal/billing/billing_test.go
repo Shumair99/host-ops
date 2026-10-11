@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,25 @@ import (
 )
 
 type fixtureTransport func(*http.Request) (*http.Response, error)
+
+func TestEnteredTokenStaysInSessionAndIsScopedToItsProvider(t *testing.T) {
+	client := fixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{}`)
+	})
+	t.Setenv("HOSTOPS_HETZNER_TOKEN", "environment-token")
+	t.Setenv("HOSTOPS_HOSTINGER_TOKEN", "other-provider-token")
+	ctx := WithSessionToken(context.Background(), "hetzner", "", "fixture-token")
+	var response map[string]any
+	if err := client.get(ctx, "hetzner", "/servers", "", &response); err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("HOSTOPS_HETZNER_TOKEN") != "environment-token" || tokenValue(context.Background(), "hetzner", "") != "environment-token" || tokenValue(ctx, "hostinger", "") != "other-provider-token" {
+		t.Fatal("session token escaped its provider/context or changed environment")
+	}
+	if tokenValue(ctx, "hetzner", "ALTERNATE_TOKEN") == "fixture-token" {
+		t.Fatal("session token escaped its named credential scope")
+	}
+}
 
 func (f fixtureTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 

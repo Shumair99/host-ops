@@ -11,8 +11,14 @@ import (
 
 func issueLines(snapshot Snapshot) []string {
 	lines := []string{}
-	if disk, ok := snapshot.Host.Values["disk_percent"]; ok && disk >= 80 {
-		lines = append(lines, fmt.Sprintf("[WARN] Root filesystem / %.1f%% used", disk))
+	for _, spec := range []struct{ key, label string }{{"cpu_percent", "Host CPU"}, {"memory_percent", "Host memory"}, {"disk_percent", "Root filesystem"}} {
+		if n := value(snapshot.Host.Values, spec.key); n != nil && *n >= 80 {
+			state := "WARN"
+			if *n >= 95 {
+				state = "FAIL"
+			}
+			lines = append(lines, fmt.Sprintf("[%s] %s / %.1f%% used (latest sample)", state, spec.label, *n))
+		}
 	}
 	if len(snapshot.Sites) == 0 {
 		lines = append(lines, "[UNKNOWN] No discovered sites")

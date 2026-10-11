@@ -24,7 +24,7 @@ func TestCostsShowsSetupInsteadOfUnknownTableAndHidesUnconfiguredFees(t *testing
 	}
 	amount := 10.0
 	text = strings.Join(Format("costs", costs.Report{TotalCost: &amount, Currency: "GBP", Sites: []costs.Allocation{{Name: "site", Cost: &amount}}}), "\n")
-	if strings.Contains(text, "HOSTING FEE") || strings.Contains(text, "UNKNOWN") || !strings.Contains(text, "GBP 10.00") {
+	if strings.Contains(text, "HOSTING FEE") || !strings.Contains(text, "GBP 10.00") || !strings.Contains(text, "Host capacity used: CPU UNKNOWN") {
 		t.Fatal("unconfigured client fees still dominate cost view", text)
 	}
 }

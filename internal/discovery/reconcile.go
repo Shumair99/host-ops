@@ -174,6 +174,13 @@ func ConcreteHost(host string) bool {
 }
 
 func ResolveUpstream(upstream string, route Route, snapshot Snapshot) []string {
+	if id := route.ResolvedUpstreams[upstream]; id != "" {
+		for _, w := range snapshot.Workloads {
+			if w.ID == id {
+				return []string{id}
+			}
+		}
+	}
 	address := upstream
 	if strings.HasPrefix(address, "unix:") {
 		address = strings.TrimPrefix(address, "unix:")

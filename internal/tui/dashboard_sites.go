@@ -54,8 +54,9 @@ func fleetLayout(available int, problem bool) (int, []fleetColumn) {
 
 func (m dashboard) fleetSummary() string {
 	healthy, attentionCount, unknownCount := 0, 0, 0
+	reports := m.groupedReports()
 	for _, s := range m.sites() {
-		switch m.report(s.ID).Overall {
+		switch reports[s.ID].Overall {
 		case "healthy":
 			healthy++
 		case "critical", "warning":
@@ -116,24 +117,49 @@ func runtimeAge(r model.Runtime) string {
 func (m dashboard) siteDetails(s config.Site, w int, compact bool) []string {
 	t, r := m.theme, m.report(s.ID)
 	group := groupFor(m.rawSites(), s.ID)
+	primary := domainReport(s, reportsByID(m.snapshot.Reports))
+	multiple := len(m.workloadReadings(group.domains())) > 1
 	sample := m.snapshot.Workloads[s.ID]
 	mem := "—"
 	uptime := "—"
-	if (r.Runtime.Status == "running" || r.Runtime.Status == "active") && layerState(r, "runtime") == model.Pass {
-		uptime = runtimeAge(r.Runtime)
+	if (primary.Runtime.Status == "running" || primary.Runtime.Status == "active") && layerState(primary, "runtime") == model.Pass {
+		uptime = runtimeAge(primary.Runtime)
 	}
 	if n := value(sample.Values, "memory_used_bytes"); n != nil {
 		mem = console.Bytes(*n)
 	}
 	rows := []string{t.badge(r.Overall) + t.paint("  report "+ageLabel(r.ObservedAt), muted)}
+	if finding := primaryFinding(r); finding != "" {
+		rows = append(rows, wrap([]string{t.paint(finding, amber)}, w-4)...)
+	}
 	if compact {
-		rows = append(rows, clean(s.Proxy.Domain), "CPU "+percent(value(sample.Values, "cpu_percent"))+"  Memory "+mem+"  Uptime "+uptime, clip("Attention: "+attention(r), w-4))
+		rows = append(rows, clean(s.Proxy.Domain))
+		if multiple {
+			rows = append(rows, m.propertyWorkloadRows(group, w)...)
+			rows = append(rows, "Uptime "+uptime)
+		} else {
+			rows = append(rows, "CPU "+percent(value(sample.Values, "cpu_percent"))+"  Memory "+mem+"  Uptime "+uptime)
+		}
+		rows = append(rows, clip("Attention: "+attention(r), w-4))
 	} else {
 		for _, domain := range group.domains() {
 			rows = append(rows, clean(domain.Proxy.Domain)+" "+t.badge(domainReport(domain, reportsByID(m.snapshot.Reports)).Overall))
 		}
-		for _, field := range [][2]string{{"Runtime", s.Runtime.Type + " / " + r.Runtime.Status}, {"CPU", percent(value(sample.Values, "cpu_percent"))}, {"Memory", mem}, {"Uptime", uptime}, {"Upstream", unknown(s.Proxy.Upstream)}, {"Image", unknown(r.Runtime.Image)}, {"Revision", unknown(r.Runtime.Commit)}, {"Attention", attention(r)}} {
+		rows = append(rows, "")
+		for _, layer := range []string{"runtime", "local_http", "proxy_route", "dns", "tls", "public_http"} {
+			state := layerState(r, layer)
+			rows = append(rows, t.strong(stateMark(state), statusColor(string(state)))+" "+t.paint(pad(layerLabel(layer), 13), muted)+" "+t.badge(string(state)))
+		}
+		rows = append(rows, "")
+		for _, field := range [][2]string{{"Runtime", s.Runtime.Type + " / " + r.Runtime.Status}, {"CPU", percent(value(sample.Values, "cpu_percent"))}, {"Memory", mem}, {"HTTP", httpLatency(r)}, {"Uptime", uptime}, {"Restarts", fmt.Sprint(r.Runtime.RestartCount)}, {"Upstream", unknown(s.Proxy.Upstream)}, {"Image", unknown(r.Runtime.Image)}, {"Revision", unknown(r.Runtime.Commit)}, {"Attention", attention(r)}} {
+			if multiple && (field[0] == "CPU" || field[0] == "Memory") {
+				continue
+			}
 			rows = append(rows, clip(t.paint(pad(field[0], 10), muted)+" "+clean(field[1]), w-4))
+		}
+		if multiple {
+			rows = append(rows, "", t.paint("WORKLOADS", muted))
+			rows = append(rows, m.propertyWorkloadRows(group, w)...)
 		}
 		rows = append(rows, t.paint("Workload sample "+ageLabel(sample.ObservedAt), muted))
 	}
@@ -143,7 +169,7 @@ func (m dashboard) siteDetails(s config.Site, w int, compact bool) []string {
 func (m dashboard) sitesWorkspace(w int) []string {
 	sites := m.filteredSites()
 	if len(sites) == 0 {
-		return m.theme.panel("Workloads", []string{"No matching properties"}, w)
+		return m.theme.panel("Properties", []string{"No matching properties"}, w)
 	}
 	selected := min(m.selected, len(sites)-1)
 	split := w >= 88
@@ -161,19 +187,20 @@ func (m dashboard) sitesWorkspace(w int) []string {
 	end := min(len(sites), start+limit)
 	inside := listWidth - 4
 	nameWidth := max(8, min(32, inside-20))
-	rows := []string{m.theme.paint(fmt.Sprintf("%d properties · %d–%d", len(sites), start+1, end), muted), m.theme.paint(pad("PROPERTY", nameWidth)+" "+pad("HEALTH", 8)+" RUNTIME", muted)}
+	sortLabel := []string{"name", "health", "peak CPU", "peak memory", "latency"}[m.siteSort]
+	rows := []string{m.theme.paint(fmt.Sprintf("%d properties · %d–%d · %s", len(sites), start+1, end, sortLabel), muted), m.theme.paint(pad("PROPERTY", nameWidth)+" "+pad("HEALTH", 8)+" RUNTIME", muted)}
 	if m.filter != "" {
 		rows[0] = clip(m.theme.paint("Filter: "+clean(m.filter), cyan), inside)
 	}
 	for i := start; i < end; i++ {
 		s, r := sites[i], m.report(sites[i].ID)
-		line := m.theme.paint(pad(clean(s.Name), nameWidth), ink) + " " + m.theme.paint(pad(strings.ToUpper(r.Overall), 8), statusColor(r.Overall)) + " " + clean(s.Runtime.Type)
+		line := m.theme.paint(pad(propertyLabel(groupFor(m.rawSites(), s.ID)), nameWidth), ink) + " " + m.theme.paint(pad(strings.ToUpper(r.Overall), 8), statusColor(r.Overall)) + " " + clean(s.Runtime.Type)
 		if i == selected {
 			line = m.theme.selection(line, inside)
 		}
 		rows = append(rows, clip(line, inside))
 	}
-	list := m.theme.panel("Workloads", rows, listWidth)
+	list := m.theme.panel("Properties", rows, listWidth)
 	if split {
 		return columns(list, details, listWidth, w-listWidth-1)
 	}

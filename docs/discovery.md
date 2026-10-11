@@ -9,7 +9,7 @@ flowchart LR
     Readers --> Facts[Sources, workloads, listeners, routes]
     Facts --> Reconcile[Identity and reconciliation]
     Reconcile --> SQLite[Local SQLite registry and history]
-    SQLite --> TUI[ASCII terminal dashboard]
+    SQLite --> TUI[Terminal dashboard]
     Reconcile --> Schedule[Public probe scheduler]
     Schedule --> SQLite
 ```
@@ -38,7 +38,7 @@ Default systemd/process inventory keeps observed network listeners, route/backen
 
 Known systemd owners remain in later scans even when their listeners disappear. The client also carries previously observed route/backend unit identities into a new collector session. This preserves confirmed stopped-service evidence without restoring the entire noisy service list.
 
-A site is a concrete observed host name on this VPS. `example.com` and `www.example.com` retain separate registry entries and independent health checks, and can share a backend. Overview and Sites group those observed pairs into one row, reflecting the worst health across both; the inspector shows each domain's checks. Other subdomains and standalone `www` domains remain separate. Domain counts are not counts of independent applications. Path routes and multiple backends stay in the graph. Bare containers, database services and arbitrary directories do not become websites merely because they exist.
+A site is a concrete observed host name on this VPS. `example.com` and `www.example.com` retain separate registry entries and independent health checks, and can share a backend. Overview and Sites group observed related domains under their outermost observed parent within the same registrable domain, reflecting the worst health across the group. The inspector retains independent address checks and distinct workloads. An absent parent is never invented, and unrelated tenants under a shared hosting suffix remain separate. Domain counts are not counts of independent applications. Path routes and multiple backends stay in the graph. Bare containers, database services and arbitrary directories do not become websites merely because they exist.
 
 Site IDs derive from host identity plus domain. Named container/Compose workload IDs survive container replacement. Replicas remain separate workload nodes. Processes outside systemd use process identity and may change IDs on restart. Systemd services are deduplicated against process observations.
 
@@ -65,7 +65,7 @@ Wildcard, regex and catch-all matchers stay in Patterns/Coverage. The system can
 | Traefik | Active `/api/rawdata` when the existing insecure API is exposed; explicit HTTP router labels contribute declared evidence | Secure/custom API and file-only declarations are not configured automatically; provider constraints remain unverified in label evidence; public ports are inferred as 80/443 |
 | Apache | Virtual-host dump file references; explicit names, aliases, roots, `ProxyPass` and redirects | Declared evidence; conditional includes, macros and rewrites are incomplete; distribution wrapper/environment requirements can make dumps unavailable |
 
-Proxy detection uses exposed executable/image names and arguments. Custom wrappers, unreadable files and missing helper tools produce limited coverage; HostOps does not install dependencies or request extra privilege. Container paths are read in their namespace. This bundle targets common installations, not every version or control panel. Docker/Caddy were checked live on the existing VPS; other adapters have fixture validation and need additional live compatibility testing.
+Proxy detection uses exposed executable/image names and arguments. Custom wrappers, unreadable files and missing helper tools produce limited coverage; HostOps does not install dependencies or request extra privilege. Container paths are read in their namespace. This bundle targets common installations, not every version or control panel. Adapter regression tests use configuration fixtures; availability on a connected server still depends on its versions, configuration and permissions.
 
 Stats use an explicit shared template projection rather than assuming complete Docker/Podman structs serialize identically. Missing counters remain unavailable. Rootless Podman network counters have documented limitations; see [Podman's stats reference](https://docs.podman.io/en/v6.1.3/markdown/podman-stats.1.html).
 

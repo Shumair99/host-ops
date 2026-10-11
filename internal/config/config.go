@@ -96,6 +96,7 @@ type Runtime struct {
 }
 
 type Proxy struct {
+	RedirectTo  string   `json:"redirect_to,omitempty"`
 	Domain      string   `json:"domain,omitempty"`
 	Upstream    string   `json:"upstream,omitempty"`
 	ExpectedIPs []string `json:"expected_ips,omitempty"`
@@ -132,6 +133,9 @@ func validServiceUnit(unit string) bool { return len(unit) <= 255 && serviceUnit
 var sshTarget = regexp.MustCompile(`^([a-zA-Z0-9_.-]+@)?[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 
 func Load(path string) (Config, error) {
+	if path == "" {
+		return Config{}, fmt.Errorf("user configuration directory unavailable; pass --config FILE")
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("open manifest: %w", err)

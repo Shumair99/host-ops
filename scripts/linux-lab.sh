@@ -9,7 +9,7 @@ fi
 # Privileges are confined to this disposable container so systemd can exercise
 # the actual sandbox. No ports or host directories are mounted or published.
 container="$("$engine" run -d --privileged --network none --cgroupns=private \
-  --tmpfs /run --tmpfs /tmp --label hostops.disposable=true "$image")"
+  --tmpfs /run --tmpfs /tmp:rw,noexec,nosuid,nodev --label hostops.disposable=true "$image")"
 [[ "$container" =~ ^[0-9a-f]{12,64}$ ]]
 trap '"$engine" rm -f "$container" >/dev/null' EXIT
 for ((i=0;i<30;i++)); do

@@ -11,15 +11,13 @@ import (
 	"github.com/Shumair99/host-ops/internal/discovery"
 	"github.com/Shumair99/host-ops/internal/storage"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 )
 
 func connect(ctx context.Context, args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("connect", flag.ContinueOnError)
 	flags.SetOutput(errOut)
-	file := flags.String("config", "local/hostops.json", "connection settings")
+	file := flags.String("config", defaultConnectionConfig(), "connection settings")
 	identity := flags.String("identity", "", "existing SSH private key file")
 	port := flags.Int("port", 0, "SSH port; zero uses SSH configuration")
 	collector := flags.String("collector", "", "Linux collector from the release bundle")
@@ -77,12 +75,7 @@ func connect(ctx context.Context, args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
-	if err = os.MkdirAll(filepath.Dir(*file), 0700); err != nil {
-		fmt.Fprintln(errOut, err)
-		return 1
-	}
-	data, _ := json.MarshalIndent(c, "", "  ")
-	if err = os.WriteFile(*file, append(data, '\n'), 0600); err != nil {
+	if err = config.Save(*file, c); err != nil {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
@@ -98,14 +91,7 @@ func connect(ctx context.Context, args []string, out, errOut io.Writer) int {
 func discover(ctx context.Context, args []string, out, errOut io.Writer) int {
 	flags := flag.NewFlagSet("discover", flag.ContinueOnError)
 	flags.SetOutput(errOut)
-	defaultFile := os.Getenv("HOSTOPS_CONFIG")
-	if defaultFile == "" {
-		defaultFile = "hostops.json"
-		if _, err := os.Stat(defaultFile); os.IsNotExist(err) {
-			defaultFile = "local/hostops.json"
-		}
-	}
-	file := flags.String("config", defaultFile, "connection settings")
+	file := flags.String("config", defaultConnectionConfig(), "connection settings")
 	db := flags.String("db", "", "inventory database (default: private per-user cache)")
 	asJSON := flags.Bool("json", false, "JSON output")
 	cached := flags.Bool("no-collect", false, "use existing inventory")

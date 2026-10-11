@@ -39,9 +39,15 @@ func TestFleetGroupsWWWAndKeepsAliasFailureInInspector(t *testing.T) {
 	for _, page := range []string{"overview", "sites"} {
 		m.page = page
 		lines := strings.Join(m.liveLines(), "\n")
+		if page == "overview" {
+			lines = strings.Join(m.healthMatrix(m.bodyWidth(), 8), "\n")
+		}
 		if len(m.sites()) != 2 || strings.Contains(lines, "www.example.com") || !strings.Contains(lines, "CRITICAL") {
 			t.Fatal("alias was duplicated or its failure was hidden", lines)
 		}
+	}
+	if notices := m.currentNotices(); len(notices) != 1 || notices[0].Label != "www.example.com" {
+		t.Fatal("alias-specific notice identified the wrong domain", notices)
 	}
 	m.filter = "www.example.com"
 	if sites := m.filteredSites(); len(sites) != 1 || sites[0].ID != "base" {
@@ -79,16 +85,16 @@ func TestUnobservedAliasPreventsGroupedPassingLayers(t *testing.T) {
 	}
 }
 
-func TestGroupingOnlyPairsObservedWWWWithItsExactBase(t *testing.T) {
+func TestGroupingPairsObservedSubdomainsWithTheirParent(t *testing.T) {
 	groups := groupSites([]config.Site{{ID: "a", Proxy: config.Proxy{Domain: "EXAMPLE.com."}}, {ID: "w", Proxy: config.Proxy{Domain: "www.example.com"}}, {ID: "api", Proxy: config.Proxy{Domain: "api.example.com"}}, {ID: "lonely", Proxy: config.Proxy{Domain: "www.elsewhere.com"}}})
-	if len(groups) != 3 {
+	if len(groups) != 2 {
 		t.Fatal("unrelated domains were merged")
 	}
 	paired := 0
 	for _, group := range groups {
-		paired += len(group.Aliases)
+		paired += len(group.Children)
 	}
-	if paired != 1 {
-		t.Fatal("exact observed WWW/base pair did not group", groups)
+	if paired != 2 {
+		t.Fatal("observed subdomains did not group under their parent", groups)
 	}
 }

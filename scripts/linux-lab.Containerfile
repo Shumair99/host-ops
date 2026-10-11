@@ -8,6 +8,10 @@ RUN curl -fsSL https://go.dev/dl/go1.27.2.linux-amd64.tar.gz -o /tmp/go.tar.gz \
     && tar -C /usr/local -xzf /tmp/go.tar.gz && rm /tmp/go.tar.gz
 ENV PATH=/usr/local/go/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV GOTOOLCHAIN=local
+# Runtime /tmp is a noexec tmpfs. Go must put executable test binaries in a
+# separate private directory rather than weakening that mount's permissions.
+RUN install -d -m 0700 /var/tmp/hostops-go-build
+ENV GOTMPDIR=/var/tmp/hostops-go-build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

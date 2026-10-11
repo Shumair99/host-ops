@@ -68,6 +68,25 @@ func TestValidateSampleRejectsUntrustedFields(t *testing.T) {
 	}
 }
 
+func TestExpandedTelemetryIsOptionalAndRetainsNumericBounds(t *testing.T) {
+	now := time.Now().UTC()
+	sample := validSample(now)
+	if err := ValidateSample(sample, "server-1", now); err != nil {
+		t.Fatal("older minimal readings stopped working", err)
+	}
+	for key := range allowedValues {
+		sample.Values[key] = 0
+	}
+	sample.Unavailable = []string{"pressure", "network"}
+	if err := ValidateSample(sample, "server-1", now); err != nil {
+		t.Fatal("bounded expanded telemetry was rejected", err)
+	}
+	sample.Values["pressure_io_some_percent"] = 101
+	if err := ValidateSample(sample, "server-1", now); err == nil {
+		t.Fatal("impossible pressure percentage accepted")
+	}
+}
+
 func TestDecodeFrameOnlyAcceptsBoundedHistoryAndLiveMetrics(t *testing.T) {
 	now := time.Now().UTC()
 	history := Frame{Version: ProtocolVersion, HostID: "server-1", Kind: "history", Samples: []metrics.Sample{validSample(now)}}

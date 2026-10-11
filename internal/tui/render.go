@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ var menu = []menuItem{
 	{"h", "host", "Host metrics"}, {"z", "inventory", "Inventory"}, {"d", "disk", "Disk usage"},
 	{"e", "events", "Timeline"}, {"n", "incidents", "Incidents"}, {"v", "monitoring", "Health log"},
 	{"a", "tools", "Tools"}, {"?", "help", "Help"},
+	{"E", "export-ai", "Export for AI"},
 }
 var toolMenu = []menuItem{
 	{"u", "security", "Security"}, {"p", "capacity", "Capacity"}, {"x", "impact", "Impact"},
@@ -34,15 +36,67 @@ func (m dashboard) filteredSites() []config.Site {
 			out = append(out, g.Primary)
 		}
 	}
+	if m.siteSort > 0 {
+		reports := m.groupedReports()
+		resources := map[string]*float64{}
+		if m.siteSort == 2 || m.siteSort == 3 {
+			key := "cpu_percent"
+			if m.siteSort == 3 {
+				key = "memory_used_bytes"
+			}
+			for _, s := range out {
+				resources[s.ID] = m.propertyMetric(s.ID, key)
+			}
+		}
+		sort.SliceStable(out, func(i, j int) bool {
+			if m.siteSort == 1 {
+				return stateRank(reports[out[i].ID].Overall) < stateRank(reports[out[j].ID].Overall)
+			}
+			if m.siteSort == 4 {
+				return latencyNumber(reports[out[i].ID]) > latencyNumber(reports[out[j].ID])
+			}
+			a, b := resources[out[i].ID], resources[out[j].ID]
+			if a == nil {
+				return false
+			}
+			if b == nil {
+				return true
+			}
+			return *a > *b
+		})
+	}
 	return out
 }
 func (m dashboard) report(id string) model.Report {
-	return groupReport(groupFor(m.rawSites(), id), reportsByID(m.snapshot.Reports))
+	group := groupFor(m.rawSites(), id)
+	reports := reportsByID(m.snapshot.Reports)
+	if id != group.Primary.ID {
+		for _, s := range group.Children {
+			if s.ID == id {
+				return domainReport(s, reports)
+			}
+		}
+	}
+	return groupReport(group, reports)
+}
+func (m dashboard) groupedReports() map[string]model.Report {
+	byID := reportsByID(m.snapshot.Reports)
+	out := map[string]model.Report{}
+	for _, g := range groupSites(m.rawSites()) {
+		out[g.Primary.ID] = groupReport(g, byID)
+	}
+	return out
 }
 func (m dashboard) bodyWidth() int  { return max(1, m.width-22) }
 func (m dashboard) bodyHeight() int { return max(1, m.height-5) }
 func (m dashboard) liveLines() []string {
 	w := m.bodyWidth()
+	if m.settings != nil {
+		return m.settingsLines(w)
+	}
+	if m.inputKind == "command" {
+		return m.commandLines(w)
+	}
 	switch m.page {
 	case "overview":
 		return m.overviewLines(w)
@@ -59,15 +113,34 @@ func (m dashboard) liveLines() []string {
 	case "tools":
 		return m.toolsPanel(w)
 	case "issues":
-		return m.theme.panel("Exceptions", m.decorate(issueLines(m.snapshot)), w)
+		return m.issuesWorkspace(w)
+	case "help":
+		return m.helpWorkspace(w)
+	case "export-ai":
+		return m.aiExportLines(w)
 	}
 	if m.loading && len(m.lines) == 0 {
 		return m.theme.panel(pageLabel(m.page), []string{m.theme.paint("Awaiting evidence…", muted)}, w)
 	}
-	if m.page == "help" {
-		return m.theme.panel("Help / keyboard & monitoring", m.decorate(m.lines), w)
+	if m.page == "logs" {
+		return m.logsWorkspace(w)
 	}
-	return m.detailLines(w)
+	lines := m.detailLines(w)
+	switch m.page {
+	case "costs":
+		action := "[Enter / S] Set up billing"
+		if m.source.Config.Host.Billing != nil {
+			action = "[Enter / S] Edit billing settings"
+		}
+		return append(m.theme.panel("Billing", []string{m.theme.strong(action, cyan)}, w), lines...)
+	case "recovery":
+		return append(m.theme.panel("Recovery setup", []string{m.theme.strong("[S] Connect backup / restore evidence", cyan)}, w), lines...)
+	case "deployments":
+		return append(m.theme.panel("Connect deployments", []string{m.theme.strong("[Enter / S] Import a deployment report", cyan)}, w), lines...)
+	case "external":
+		return append(m.theme.panel("Connect a watcher", []string{m.theme.strong("[Enter / S] Import independent observations", cyan)}, w), lines...)
+	}
+	return lines
 }
 func pageLabel(page string) string {
 	for _, v := range allViews() {
@@ -122,10 +195,15 @@ func (m dashboard) frame() string {
 	mode := "LIVE / READ-ONLY"
 	if m.source.Demo {
 		mode = "DEMO / FICTIONAL DATA"
+	} else if m.settings != nil {
+		mode = "LOCAL SETTINGS"
 	} else if m.noCollect {
 		mode = "RETAINED / AUTO OFF"
 	}
 	title := pageLabel(m.page)
+	if toolIndex(m.page) >= 0 && m.siteID == "" {
+		title = "Tools / " + title
+	}
 	if m.siteID != "" {
 		title = pageLabel(m.page) + " / " + clean(m.report(m.siteID).Name)
 		if m.page == "site" {
@@ -151,10 +229,17 @@ func (m dashboard) frame() string {
 	} else if m.collecting {
 		state = "COLLECTING"
 	}
+	stateColor := statusColor(state)
+	if m.propagating() {
+		// Reserve all three dot cells so adjacent notices never move.
+		state = pad("PROPAGATING"+strings.Repeat(".", m.propagationFrame+1), 14)
+		stateColor = amber
+	}
 	if m.collectErr != "" {
 		state = "COLLECTION ERROR"
+		stateColor = red
 	}
-	header := t.paint(host, ink) + "  " + t.paint(state, statusColor(state))
+	header := t.paint(host, ink) + "  " + t.paint(state, stateColor)
 	if m.snapshot.HistoryNotice != "" {
 		header += t.paint("  HISTORY PRUNED · doctor for details", amber)
 	}
@@ -170,8 +255,10 @@ func (m dashboard) frame() string {
 	} else if m.page == "tools" {
 		offset = min(max(0, m.toolSelected-bodyHeight+4), max(0, len(content)-bodyHeight))
 	}
-	navHeight := bodyHeight - 1
-	navStart := max(0, min(m.navSelected-navHeight/2, len(menu)-navHeight))
+	if m.inputKind == "command" {
+		offset = 0
+	}
+	navigation := m.navigationRows(bodyHeight - 1)
 	for row := 0; row < bodyHeight; row++ {
 		left := ""
 		if row == 0 {
@@ -179,18 +266,8 @@ func (m dashboard) frame() string {
 			if m.menuFocus {
 				left = t.strong("VIEWS  ‹", cyan)
 			}
-		} else {
-			i := navStart + row - 1
-			if i < len(menu) {
-				item := menu[i]
-				left = " " + t.paint(item.Key, cyan) + "  " + t.paint(item.Label, muted)
-				if i == menuIndex(m.page) {
-					left = t.strong(" "+item.Key+"  "+item.Label, ink)
-				}
-				if m.menuFocus && i == m.navSelected {
-					left = t.selection(" "+item.Key+"  "+item.Label, 18)
-				}
-			}
+		} else if row-1 < len(navigation) {
+			left = navigation[row-1]
 		}
 		body := ""
 		if row+offset < len(content) {
@@ -199,38 +276,76 @@ func (m dashboard) frame() string {
 		rows = append(rows, pad(left, 18)+" "+t.paint("│", edge)+" "+pad(body, m.bodyWidth())+" ")
 	}
 	footer := m.keyBar()
-	if m.notice != "" {
-		footer = clean(m.notice)
-	}
-	if m.collectErr != "" {
-		footer = "Collector unavailable · retained evidence"
-	}
 	if m.inputKind != "" {
-		footer = clean(m.inputKind+": "+m.input) + "▏  Enter apply · Esc cancel"
+		footer = clean(m.inputKind+": "+m.input) + "|  Enter apply · Esc cancel"
+		if m.inputKind == "export-directory" {
+			footer = "Folder: " + clean(m.input) + "|  Enter save · Esc cancel"
+		}
 	}
 	if len(content) > bodyHeight {
 		footer += fmt.Sprintf("  %d/%d", min(offset+bodyHeight, len(content)), len(content))
 	}
-	rows = append(rows, pad(t.paint(footer, muted), w), pad(t.paint("? help", cyan)+t.paint("   q quit", muted), w))
+	globalKeys := t.paint("Ctrl+P jump", cyan) + t.paint("   ? help   q quit", muted)
+	if m.settings != nil || m.inputKind != "" {
+		globalKeys = t.paint("Ctrl+C quit", muted)
+	} else if m.collectErr != "" {
+		globalKeys = t.paint("Collector unavailable · retained evidence", amber)
+	} else if m.notice != "" {
+		globalKeys = t.paint(clean(m.notice), muted)
+	}
+	rows = append(rows, pad(t.paint(footer, muted), w), pad(globalKeys, w))
 	return strings.Join(rows, "\n")
 }
 func (m dashboard) keyBar() string {
+	if m.settings != nil {
+		if m.settings.Busy {
+			return "Working…"
+		}
+		if m.settings.Step == "fields" {
+			if m.settings.Selected < len(m.settings.Fields) && len(m.settings.Fields[m.settings.Selected].Choices) > 0 {
+				return "Esc back   ←→ currency / click   Tab next   Enter next"
+			}
+			return "Esc back   Tab / ↑↓ field   Enter next / save   Ctrl+S save"
+		}
+		return "Esc back   ↑↓ choose   Enter continue"
+	}
 	if m.menuFocus {
+		if m.page == "export-ai" {
+			return "↑↓ view   Enter review export   → focus"
+		}
 		return "↑↓ view   → focus   letter jump"
 	}
 	switch m.page {
 	case "sites":
-		return "↑↓ site   Enter inspect   / filter   ← views"
+		return "Esc back   ↑↓ site   Enter inspect   / filter   2 sort"
 	case "disk":
-		return "↑↓ dir   Enter open   Backspace parent   PgDn scroll   Space rescan   ← views"
+		return "Esc back   ↑↓ dir   Enter open   Backspace parent   Space rescan"
 	case "site":
-		return "↑↓ scroll   l logs   a readiness   b recovery   Esc back"
+		return "Esc back   ↑↓ scroll   l logs   a readiness   b recovery"
 	case "tools":
-		return "↑↓ tool   Enter open   ← views"
+		return "Esc back   ↑↓ tool   Enter open"
+	case "readiness":
+		return "Esc back   ↑↓ property   PgDn scroll   1 passed rules"
+	case "recovery":
+		return "Esc back   ↑↓ property   S setup   Wheel / PgDn scroll"
+	case "incidents":
+		return "Esc back   ↑↓ incident   PgDn scroll   w export selected"
+	case "security":
+		return "Esc back   ↑↓ / Wheel scroll   1 passed findings   Space refresh"
+	case "export-ai":
+		if m.aiExport != nil && m.aiExport.Confirm {
+			return "Esc cancel   Enter confirm export   P folder"
+		}
+		if m.aiExport != nil && m.aiExport.Busy {
+			return "Esc back   Exporting…   Wheel / PgDn scroll"
+		}
+		return "Esc back   Enter review export   P folder   Wheel / PgDn scroll"
+	case "costs", "deployments", "external":
+		return "Esc back   Enter / S setup   Wheel / PgDn scroll   Space refresh"
 	default:
 		if toolIndex(m.page) >= 0 && m.siteID == "" {
-			return "↑↓ scroll   Space refresh   Esc tools   ← views"
+			return "Esc back   ↑↓ / Wheel scroll   Space refresh"
 		}
-		return "↑↓ scroll   Space refresh   ← views"
+		return "Esc back   ↑↓ / Wheel scroll   Space refresh"
 	}
 }

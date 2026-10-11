@@ -11,16 +11,37 @@ import (
 	"time"
 )
 
-func TestAllocationConservesCostAndUnknownInputs(t *testing.T) {
-	c := config.Config{Host: config.Host{MonthlyCost: 10}, Sites: []config.Site{{ID: "a"}, {ID: "b"}}}
-	r := Allocate(c, map[string][]metrics.Sample{"a": {{Values: map[string]float64{"memory_used_bytes": 75, "cpu_percent": 10}}}, "b": {{Values: map[string]float64{"memory_used_bytes": 25, "cpu_percent": 0}}}})
-	if math.Abs(*r.Sites[0].Cost+*r.Sites[1].Cost-10) > .000001 {
-		t.Fatal("cost not conserved", r)
-	}
+func TestAllocationPricesActualCapacityAndKeepsUnusedBudget(t *testing.T) {
+	c, samples, hosts := lowUsageFixture()
+	r := Allocate(c, samples, hosts)
+	closeTo(t, r.TotalCost, 100)
+	closeTo(t, r.Sites[0].CPUshare, .1)
+	closeTo(t, r.Sites[0].MemoryShare, .2)
+	closeTo(t, r.Sites[0].Cost, 15)
+	closeTo(t, r.SiteCost, 15)
+	closeTo(t, r.UnallocatedCost, 85)
+	closeTo(t, r.UnusedCost, 75)
+	closeTo(t, r.OtherCost, 10)
+	closeTo(t, number(*r.SiteCost+*r.OtherCost+*r.UnusedCost), 100)
 	c.Host.MonthlyCost = 0
-	r = Allocate(c, nil)
+	r = Allocate(c, samples, hosts)
 	if r.TotalCost != nil || r.Sites[0].Cost != nil || r.Sites[0].Margin != nil {
 		t.Fatal("missing costs fabricated")
+	}
+}
+
+func lowUsageFixture() (config.Config, map[string][]metrics.Sample, []metrics.Sample) {
+	now := time.Now().UTC()
+	c := config.Config{Host: config.Host{ID: "h", MonthlyCost: 100, Currency: "GBP"}, Sites: []config.Site{{ID: "a", HostID: "h", Runtime: config.Runtime{Type: "docker", Container: "a"}}}}
+	samples := map[string][]metrics.Sample{"a": {{HostID: "h", ObservedAt: now, Values: map[string]float64{"cpu_percent": 40, "memory_used_bytes": 200, "memory_percent": 99}}}}
+	hosts := []metrics.Sample{{HostID: "h", ObservedAt: now, Values: map[string]float64{"cpu_count": 4, "cpu_percent": 20, "memory_total_bytes": 1000, "memory_used_bytes": 300}}}
+	return c, samples, hosts
+}
+
+func closeTo(t *testing.T, got *float64, want float64) {
+	t.Helper()
+	if got == nil || math.Abs(*got-want) > 1e-9 {
+		t.Fatalf("got %v, want %.9f", got, want)
 	}
 }
 
@@ -46,8 +67,8 @@ func TestProviderCurrencyCannotSilentlyRepriceClientFees(t *testing.T) {
 
 func TestWWWIsNotChargedTwiceAndExplicitZeroBudgetIsKnown(t *testing.T) {
 	zero := 0.0
-	c := config.Config{Host: config.Host{Billing: &config.Billing{Provider: "manual", MonthlyAmount: &zero}}, Sites: []config.Site{{ID: "base", Proxy: config.Proxy{Domain: "example.com"}}, {ID: "www", Proxy: config.Proxy{Domain: "www.example.com"}}, {ID: "other", Proxy: config.Proxy{Domain: "other.example.com"}}}}
-	r := Allocate(c, nil)
+	c := config.Config{Host: config.Host{Billing: &config.Billing{Provider: "manual", MonthlyAmount: &zero}}, Sites: []config.Site{{ID: "base", Proxy: config.Proxy{Domain: "example.com"}}, {ID: "www", Proxy: config.Proxy{Domain: "www.example.com", RedirectTo: "example.com"}}, {ID: "other", Proxy: config.Proxy{Domain: "other.example.com"}}}}
+	r := Allocate(c, nil, nil)
 	if len(r.Sites) != 2 || r.TotalCost == nil || *r.TotalCost != 0 || r.Sites[0].Cost == nil || *r.Sites[0].Cost != 0 {
 		t.Fatal("aliases or known zero were handled incorrectly", r)
 	}

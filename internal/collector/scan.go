@@ -29,7 +29,7 @@ func Scan(ctx context.Context, host config.Host) discovery.Snapshot {
 	proxies := []proxyInstance{}
 	for _, meta := range metadata {
 		for _, w := range snapshot.Workloads {
-			if w.InstanceID == meta.ID && w.ProxyKind != "" {
+			if w.InstanceID == meta.ID && w.ProxyKind != "" && w.Status == "running" {
 				proxies = append(proxies, proxyInstance{kind: w.ProxyKind, binary: w.ProxyKind, engine: meta.Engine, container: meta.Name, args: meta.Args, workload: w})
 				break
 			}
@@ -57,7 +57,10 @@ func Scan(ctx context.Context, host config.Host) discovery.Snapshot {
 			snapshot.Sources = append(snapshot.Sources, discovery.Source{ID: "proxy/" + proxy.kind + "/" + proxy.workload.ID, ParentID: proxy.workload.SourceID, Kind: proxy.kind, State: "unavailable", Mode: "configured", ObservedAt: snapshot.ObservedAt, Issue: "Proxy reader is not yet available"})
 		}
 	}
+	resolveRouteDNS(ctx, runner, proxies, &snapshot)
 	filterWorkloads(&snapshot, host)
+	observeConnections("/proc", &snapshot)
+	readBackupArtifacts(ctx, &snapshot)
 	return snapshot
 }
 

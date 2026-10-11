@@ -27,6 +27,8 @@ type Options struct {
 	Page                  string
 	Color                 string
 	Width, Height         int
+	ConfigPath            string
+	SetupBilling          bool
 }
 type jobs struct {
 	mu      sync.Mutex
@@ -69,6 +71,10 @@ type telemetryMsg struct {
 	snapshot   Snapshot
 	err        error
 }
+type connectionMsg struct {
+	connection agent.Connection
+	err        error
+}
 type dashboard struct {
 	ctx                                     context.Context
 	source                                  Source
@@ -79,11 +85,18 @@ type dashboard struct {
 	selected, offset, generation            int
 	navSelected                             int
 	toolSelected                            int
+	commandSelected                         int
+	siteSort                                int
+	assessmentSelected                      int
+	showPassing                             bool
 	menuFocus                               bool
 	viewCache                               map[string][]string
 	detailCache                             map[string]any
 	theme                                   theme
 	telemetryReading                        bool
+	connectionReading                       bool
+	startupComplete                         bool
+	propagationFrame                        int
 	diskReading                             bool
 	diskPath                                string
 	diskSelected                            int
@@ -94,6 +107,10 @@ type dashboard struct {
 	notice, collectErr, inputKind, input    string
 	cancelRead                              context.CancelFunc
 	demoOutage, demoBusy                    bool
+	configPath                              string
+	settings                                *settingsEditor
+	settingsVersion                         int
+	aiExport                                *aiExportState
 }
 
 func Run(parent context.Context, c config.Config, dbPath string, opts Options, input io.Reader, out io.Writer) error {
@@ -144,6 +161,7 @@ func Run(parent context.Context, c config.Config, dbPath string, opts Options, i
 	source := Source{Config: c, Store: store, Demo: opts.Demo, MaxAge: max(3*time.Minute, 3*opts.Interval)}
 	if !opts.Demo && !opts.NoCollect && !opts.Once && c.Discovering() {
 		source.Live = true
+		source.LiveStartedAt = time.Now()
 		source.Refresh = make(chan struct{}, 1)
 		done := make(chan struct{})
 		go func() { defer close(done); _ = agent.RunLive(ctx, c, store, opts.Interval, source.Refresh) }()
@@ -177,6 +195,7 @@ func Run(parent context.Context, c config.Config, dbPath string, opts Options, i
 			return err
 		}
 		m.loading = false
+		m.startupComplete = true
 		_, err = fmt.Fprintln(out, m.frame())
 		return err
 	}
@@ -208,6 +227,11 @@ func newDashboard(ctx context.Context, source Source, opts Options) dashboard {
 	m := dashboard{ctx: ctx, source: source, jobs: &jobs{}, interval: opts.Interval, width: width, height: height, page: page, target: "host", noCollect: opts.NoCollect, loading: true, menuFocus: true, viewCache: map[string][]string{}, detailCache: map[string]any{}, collecting: !opts.NoCollect && !opts.Demo && !opts.Once}
 	m.theme.color = opts.Color == "always" || (opts.Color != "never" && !opts.Once && os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb")
 	m.navSelected = menuIndex(page)
+	m.configPath = opts.ConfigPath
+	if opts.SetupBilling {
+		m.page, m.navSelected = "costs", menuIndex("costs")
+		m.openSettings()
+	}
 	return m
 }
 func (m dashboard) Init() tea.Cmd {
@@ -249,13 +273,18 @@ func (m dashboard) cycleCmd() tea.Cmd {
 	return m.jobs.command(func() tea.Msg { return cycleMsg{err: agent.Cycle(m.ctx, m.source.Config, m.source.Store)} })
 }
 func (m *dashboard) goPage(page string) tea.Cmd {
+	m.cancelAIExportConfirmation()
 	m.page = page
+	if page == "export-ai" {
+		m.ensureAIExport()
+	}
 	m.navSelected = menuIndex(page)
 	m.menuFocus = false
 	m.loading = true
 	m.lines = nil
 	m.snapshot.Detail = nil
 	m.offset = 0
+	m.assessmentSelected = 0
 	m.notice = ""
 	m.siteID = ""
 	return m.reload()
@@ -307,6 +336,7 @@ func (m *dashboard) previewMenu(index int) tea.Cmd {
 		return nil
 	}
 	if demandPage(page) && !m.source.Demo {
+		m.cancelAIExportConfirmation()
 		if m.cancelRead != nil {
 			m.cancelRead()
 		}
@@ -349,6 +379,52 @@ func (m *dashboard) inspectPage(page string) tea.Cmd {
 }
 func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := message.(type) {
+	case aiExportMsg:
+		m.ensureAIExport()
+		m.aiExport.Busy, m.aiExport.Confirm = false, false
+		if msg.err != nil {
+			m.aiExport.Error = "Could not save export: " + msg.err.Error()
+		} else {
+			m.aiExport.SavedPath, m.aiExport.Bytes, m.aiExport.Sections = msg.path, msg.bytes, msg.sections
+			m.aiExport.SavedAt, m.aiExport.Error = time.Now(), ""
+			m.notice = "AI export saved: " + msg.path
+		}
+	case settingsMsg:
+		if m.settings == nil || msg.version != m.settingsVersion {
+			return m, nil
+		}
+		m.settings.Busy = false
+		if msg.err != nil {
+			m.settings.Error = msg.err.Error()
+			return m, nil
+		}
+		if msg.resources != nil {
+			m.settings.Resources, m.settings.Step, m.settings.Selected = msg.resources, "resources", 0
+			m.offset = 0
+			return m, nil
+		}
+		if msg.config != nil {
+			m.source.Config = *msg.config
+			delete(m.viewCache, "costs")
+			delete(m.detailCache, "costs")
+		}
+		m.settings, m.offset, m.notice = nil, 0, msg.notice
+		return m, m.reload()
+	case tea.MouseWheelMsg:
+		cmd := m.mouseWheel(msg)
+		return m, cmd
+	case tea.MouseClickMsg:
+		cmd := m.mouseClick(msg)
+		return m, cmd
+	case tea.PasteMsg:
+		if m.settings != nil {
+			cmd := m.updateSettings(tea.KeyPressMsg{Text: msg.Content})
+			return m, cmd
+		}
+		if m.inputKind != "" {
+			return m.Update(tea.KeyPressMsg{Text: msg.Content})
+		}
+		return m, nil
 	case diskMsg:
 		m.diskReading = false
 		if msg.err == nil {
@@ -363,6 +439,12 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+	case connectionMsg:
+		m.connectionReading = false
+		if msg.err == nil && !msg.connection.ObservedAt.Before(m.snapshot.Connection.ObservedAt) {
+			m.snapshot.Connection = msg.connection
+		}
+		m.finishInitialLoad()
 	case loadedMsg:
 		if msg.generation != m.generation {
 			return m, nil
@@ -370,6 +452,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		initial := m.loading
 		m.loading, m.reading = false, false
 		if msg.err != nil {
+			m.startupComplete = true
 			if initial {
 				m.lines = []string{"Evidence unavailable. Check configuration and access.", msg.err.Error()}
 				m.notice = "Read failed; no successful result is assumed."
@@ -377,6 +460,9 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = "Refresh failed; showing previous evidence: " + msg.err.Error()
 			}
 		} else {
+			if m.snapshot.Connection.ObservedAt.After(msg.snapshot.Connection.ObservedAt) {
+				msg.snapshot.Connection = m.snapshot.Connection
+			}
 			// A slow Disk scan must not roll back recent streamed telemetry.
 			// An older cached sample must never override a fresh stale-data decision.
 			if m.page == "disk" && time.Since(m.snapshot.Host.ObservedAt) < 5*time.Second && m.snapshot.Host.ObservedAt.After(msg.snapshot.Host.ObservedAt) {
@@ -392,15 +478,21 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.selected = min(m.selected, max(0, len(m.filteredSites())-1))
+		m.assessmentSelected = min(m.assessmentSelected, max(0, m.assessmentCount()-1))
+		m.finishInitialLoad()
 	case telemetryMsg:
 		m.telemetryReading = false
 		if msg.generation == m.generation && msg.err == nil {
+			if m.snapshot.Connection.ObservedAt.After(msg.snapshot.Connection.ObservedAt) {
+				msg.snapshot.Connection = m.snapshot.Connection
+			}
 			msg.snapshot.Detail = m.snapshot.Detail
 			if m.snapshot.Disk != nil && (msg.snapshot.Disk == nil || m.snapshot.Disk.ObservedAt.After(msg.snapshot.Disk.ObservedAt)) {
 				msg.snapshot.Disk = m.snapshot.Disk
 			}
 			m.snapshot = msg.snapshot
 		}
+		m.finishInitialLoad()
 	case cycleMsg:
 		m.collecting = false
 		m.demoBusy = false
@@ -415,6 +507,7 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil && m.ctx.Err() == nil {
 			m.collectErr = "Collection failed"
 		}
+		m.finishInitialLoad()
 		m.collectVersion++
 		version := m.collectVersion
 		commands := []tea.Cmd{}
@@ -431,8 +524,15 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.cycleCmd()
 		}
 	case tickMsg:
+		m.propagationFrame = (m.propagationFrame + 1) % 3
 		tick := tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} })
 		commands := []tea.Cmd{tick}
+		// Keep connection state current even on cached assessment/settings pages.
+		// This reads local state only and does not rerun their remote inspections.
+		if m.source.Live && !m.connectionReading {
+			m.connectionReading = true
+			commands = append(commands, m.connectionCmd())
+		}
 		if !m.noCollect && !m.source.Demo && !m.source.Config.Host.DiskScanDisabled && !m.diskReading && (!m.source.Live || !m.snapshot.Inventory.Snapshot.ObservedAt.IsZero()) && agent.DiskDue(m.snapshot.Disk, m.snapshot.DiskScan, time.Now()) {
 			m.diskReading = true
 			commands = append(commands, m.diskCmd(false))
@@ -456,7 +556,40 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if key == "ctrl+c" {
 			return m, tea.Quit
 		}
+		if m.settings != nil {
+			cmd := m.updateSettings(msg)
+			return m, cmd
+		}
 		if m.inputKind != "" {
+			if m.inputKind == "command" {
+				switch key {
+				case "up":
+					m.commandSelected = wrapIndex(m.commandSelected, -1, len(m.destinations()))
+					return m, nil
+				case "down":
+					m.commandSelected = wrapIndex(m.commandSelected, 1, len(m.destinations()))
+					return m, nil
+				case "home":
+					m.commandSelected = 0
+					return m, nil
+				case "end":
+					m.commandSelected = max(0, len(m.destinations())-1)
+					return m, nil
+				case "enter":
+					items := m.destinations()
+					if len(items) == 0 {
+						return m, nil
+					}
+					item := items[min(m.commandSelected, len(items)-1)]
+					m.inputKind, m.input = "", ""
+					if item.SiteID != "" {
+						m.siteID = item.SiteID
+						m.navSelected = menuIndex("sites")
+						return m, m.inspectPage("site")
+					}
+					return m, m.goPage(item.Page)
+				}
+			}
 			switch key {
 			case "esc":
 				m.inputKind = ""
@@ -469,18 +602,27 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 					if strings.TrimSpace(m.input) != "" {
 						m.target = strings.TrimSpace(m.input)
 					}
+				} else if m.inputKind == "export-directory" {
+					m.setAIExportDirectory(m.input)
 				}
 				m.inputKind = ""
 				m.input = ""
 				return m, m.reload()
 			case "backspace":
 				if len(m.input) > 0 {
-					m.input = m.input[:len(m.input)-1]
+					runes := []rune(m.input)
+					m.input = string(runes[:len(runes)-1])
 				}
+				m.commandSelected = 0
 			default:
-				if len(msg.Text) > 0 && len(m.input)+len(msg.Text) < 128 {
+				m.commandSelected = 0
+				limit := 128
+				if m.inputKind == "export-directory" {
+					limit = 4096
+				}
+				if len(msg.Text) > 0 && len(m.input)+len(msg.Text) < limit {
 					for _, r := range msg.Text {
-						if r >= 32 && r < 127 {
+						if r >= 32 && r != 127 && (r < 127 || m.inputKind == "export-directory") {
 							m.input += string(r)
 						}
 					}
@@ -489,12 +631,45 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch key {
+		case "ctrl+p":
+			m.inputKind, m.input = "command", ""
+			m.commandSelected = 0
+			return m, nil
+		case "S":
+			if m.page == "costs" || m.page == "recovery" || m.page == "deployments" || m.page == "external" {
+				m.openSettings()
+				return m, nil
+			}
+		case "P":
+			if m.page == "export-ai" {
+				m.editAIExportDirectory()
+				return m, nil
+			}
+		case "2":
+			if m.page == "sites" && !m.menuFocus {
+				m.siteSort = (m.siteSort + 1) % 5
+				m.selected = 0
+				return m, nil
+			}
+		case "1":
+			if m.page == "readiness" || m.page == "security" {
+				m.showPassing = !m.showPassing
+				return m, nil
+			}
 		case "q":
 			return m, tea.Quit
 		case "esc":
+			if m.page == "export-ai" && m.aiExport != nil && m.aiExport.Confirm {
+				m.cancelAIExportConfirmation()
+				m.menuFocus, m.offset = false, 0
+				return m, nil
+			}
 			if toolIndex(m.page) >= 0 && m.siteID == "" {
 				m.backToTools()
 				return m, nil
+			}
+			if !m.menuFocus && m.siteID != "" && m.page != "site" {
+				return m, m.inspectPage("site")
 			}
 			if !m.menuFocus && (m.siteID != "" || m.page == "site" || m.page == "logs") {
 				return m, m.goPage("sites")
@@ -524,50 +699,43 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case "up", "k":
-			if m.menuFocus {
-				return m, m.previewMenu(max(0, m.navSelected-1))
-			} else if m.page == "tools" {
-				m.toolSelected = max(0, m.toolSelected-1)
-			} else if m.page == "sites" {
-				m.selected = max(0, m.selected-1)
-			} else if m.page == "disk" {
-				m.diskSelected = max(0, m.diskSelected-1)
-			} else {
-				m.offset = max(0, m.offset-1)
-			}
+			cmd := m.moveSelection(-1, true)
+			return m, cmd
 		case "down", "j":
-			if m.menuFocus {
-				return m, m.previewMenu(min(len(menu)-1, m.navSelected+1))
-			} else if m.page == "tools" {
-				m.toolSelected = min(len(toolMenu)-1, m.toolSelected+1)
-			} else if m.page == "sites" {
-				m.selected = min(max(0, len(m.filteredSites())-1), m.selected+1)
-			} else if m.page == "disk" {
-				m.diskSelected = min(max(0, len(m.diskChildren())-1), m.diskSelected+1)
-			} else {
-				m.offset++
-			}
+			cmd := m.moveSelection(1, true)
+			return m, cmd
 		case "pgup":
 			if m.menuFocus {
 				return m, m.previewMenu(max(0, m.navSelected-max(1, m.height-10)))
 			} else if m.page == "sites" {
 				m.selected = max(0, m.selected-max(1, m.height-10))
+			} else if m.page == "tools" {
+				cmd := m.moveSelection(-max(1, m.bodyHeight()/2), false)
+				return m, cmd
 			} else {
-				m.offset = max(0, m.offset-max(1, m.height-10))
+				m.scroll(-m.bodyHeight())
 			}
 		case "pgdown":
 			if m.menuFocus {
 				return m, m.previewMenu(min(len(menu)-1, m.navSelected+max(1, m.height-10)))
 			} else if m.page == "sites" {
 				m.selected = min(max(0, len(m.filteredSites())-1), m.selected+max(1, m.height-10))
+			} else if m.page == "tools" {
+				cmd := m.moveSelection(max(1, m.bodyHeight()/2), false)
+				return m, cmd
 			} else {
-				m.offset += max(1, m.height-10)
+				m.scroll(m.bodyHeight())
 			}
 		case "home":
 			if m.menuFocus {
 				return m, m.previewMenu(0)
 			} else if m.page == "tools" {
 				m.toolSelected = 0
+			} else if m.page == "disk" {
+				m.diskSelected, m.offset = 0, 0
+			} else if m.assessmentCount() > 0 {
+				m.assessmentSelected = 0
+				m.offset = 0
 			} else {
 				m.offset = 0
 				m.selected = 0
@@ -579,12 +747,32 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				m.toolSelected = len(toolMenu) - 1
 			} else if m.page == "sites" {
 				m.selected = max(0, len(m.filteredSites())-1)
+			} else if m.page == "disk" {
+				m.diskSelected = max(0, len(m.diskChildren())-1)
+			} else if m.assessmentCount() > 0 {
+				m.assessmentSelected = m.assessmentCount() - 1
+				m.offset = 0
 			} else {
 				m.offset = max(0, len(wrap(m.liveLines(), m.bodyWidth()))-m.bodyHeight())
 			}
 		case "enter":
 			if m.menuFocus {
+				if m.page == "export-ai" {
+					m.requestAIExport()
+					return m, nil
+				}
 				return m, m.focusContent()
+			}
+			if m.page == "export-ai" {
+				if m.aiExport != nil && m.aiExport.Confirm {
+					return m, m.startAIExport()
+				}
+				m.requestAIExport()
+				return m, nil
+			}
+			if m.page == "costs" || m.page == "deployments" || m.page == "external" {
+				m.openSettings()
+				return m, nil
 			}
 			if m.page == "disk" {
 				m.openDiskDirectory()
@@ -692,10 +880,18 @@ func (m dashboard) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 func (m dashboard) View() tea.View {
 	v := tea.NewView(m.frame())
 	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = "Amadeus HostOps - Terminal"
 	return v
 }
 func (m dashboard) exportCmd() tea.Cmd {
+	selectedID := ""
+	if records, ok := m.snapshot.Detail.([]storage.Record); ok && len(records) > 0 {
+		var selected incidents.Incident
+		if json.Unmarshal(records[min(m.assessmentSelected, len(records)-1)].Data, &selected) == nil {
+			selectedID = selected.ID
+		}
+	}
 	return m.jobs.command(func() tea.Msg {
 		records, err := incidents.List(m.ctx, m.source.Store, m.source.Config.Host.ID, m.siteID)
 		if err != nil || len(records) == 0 {
@@ -704,6 +900,9 @@ func (m dashboard) exportCmd() tea.Cmd {
 		var incident incidents.Incident
 		if json.Unmarshal(records[0].Data, &incident) != nil {
 			return noticeMsg("Incident evidence unavailable.")
+		}
+		if selectedID != "" {
+			incident.ID = selectedID
 		}
 		capsule, err := incidents.Export(m.ctx, m.source.Store, m.source.Config.Host.ID, incident.ID)
 		if err != nil {

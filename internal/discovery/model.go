@@ -4,6 +4,8 @@ package discovery
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"github.com/Shumair99/host-ops/internal/model"
 	"time"
 )
 
@@ -31,26 +33,34 @@ type Mount struct {
 }
 
 type Workload struct {
-	ID            string              `json:"id"`
-	InstanceID    string              `json:"instance_id,omitempty"`
-	SourceID      string              `json:"source_id"`
-	Type          string              `json:"type"`
-	Name          string              `json:"name"`
-	Project       string              `json:"project,omitempty"`
-	Service       string              `json:"service,omitempty"`
-	Status        string              `json:"status"`
-	Health        string              `json:"health,omitempty"`
-	Image         string              `json:"image,omitempty"`
-	ImageID       string              `json:"image_id,omitempty"`
-	RestartCount  int                 `json:"restart_count,omitempty"`
-	StartedAt     string              `json:"started_at,omitempty"`
-	Revision      string              `json:"revision,omitempty"`
-	RestartPolicy string              `json:"restart_policy,omitempty"`
-	Networks      map[string]Network  `json:"networks,omitempty"`
-	Ports         map[string][]string `json:"ports,omitempty"`
-	Mounts        []Mount             `json:"mounts,omitempty"`
-	PID           int                 `json:"pid,omitempty"`
-	ProxyKind     string              `json:"proxy_kind,omitempty"`
+	ID              string                `json:"id"`
+	InstanceID      string                `json:"instance_id,omitempty"`
+	SourceID        string                `json:"source_id"`
+	Type            string                `json:"type"`
+	Name            string                `json:"name"`
+	Project         string                `json:"project,omitempty"`
+	Service         string                `json:"service,omitempty"`
+	Status          string                `json:"status"`
+	Health          string                `json:"health,omitempty"`
+	Image           string                `json:"image,omitempty"`
+	ImageID         string                `json:"image_id,omitempty"`
+	RestartCount    int                   `json:"restart_count,omitempty"`
+	StartedAt       string                `json:"started_at,omitempty"`
+	Revision        string                `json:"revision,omitempty"`
+	RestartPolicy   string                `json:"restart_policy,omitempty"`
+	PostureObserved bool                  `json:"posture_observed,omitempty"`
+	Processes       model.ProcessSnapshot `json:"processes,omitempty"`
+	User            string                `json:"user,omitempty"`
+	Privileged      bool                  `json:"privileged"`
+	ReadOnly        bool                  `json:"read_only"`
+	MemoryLimit     int64                 `json:"memory_limit"`
+	Networks        map[string]Network    `json:"networks,omitempty"`
+	Ports           map[string][]string   `json:"ports,omitempty"`
+	Mounts          []Mount               `json:"mounts,omitempty"`
+	PID             int                   `json:"pid,omitempty"`
+	ProxyKind       string                `json:"proxy_kind,omitempty"`
+	Directory       string                `json:"directory,omitempty"`
+	NetworkMode     string                `json:"network_mode,omitempty"`
 }
 
 type Listener struct {
@@ -60,30 +70,59 @@ type Listener struct {
 }
 
 type Route struct {
-	ID         string   `json:"id"`
-	SourceID   string   `json:"source_id"`
-	ProxyID    string   `json:"proxy_id,omitempty"`
-	Hosts      []string `json:"hosts"`
-	Paths      []string `json:"paths,omitempty"`
-	Kind       string   `json:"kind"`
-	Scheme     string   `json:"scheme"`
-	Port       string   `json:"port,omitempty"`
-	Upstreams  []string `json:"upstreams,omitempty"`
-	Root       string   `json:"root,omitempty"`
-	RedirectTo string   `json:"redirect_to,omitempty"`
-	Networks   []string `json:"networks,omitempty"`
-	Note       string   `json:"note,omitempty"`
+	ResolvedUpstreams map[string]string `json:"resolved_upstreams,omitempty"`
+	ID                string            `json:"id"`
+	SourceID          string            `json:"source_id"`
+	ProxyID           string            `json:"proxy_id,omitempty"`
+	Hosts             []string          `json:"hosts"`
+	Paths             []string          `json:"paths,omitempty"`
+	Kind              string            `json:"kind"`
+	Scheme            string            `json:"scheme"`
+	Port              string            `json:"port,omitempty"`
+	Upstreams         []string          `json:"upstreams,omitempty"`
+	Root              string            `json:"root,omitempty"`
+	RedirectTo        string            `json:"redirect_to,omitempty"`
+	Networks          []string          `json:"networks,omitempty"`
+	Note              string            `json:"note,omitempty"`
 }
 
 type Snapshot struct {
-	HostID       string     `json:"host_id"`
-	ObservedAt   time.Time  `json:"observed_at"`
-	OS           string     `json:"os"`
-	Architecture string     `json:"architecture"`
-	Sources      []Source   `json:"sources"`
-	Workloads    []Workload `json:"workloads"`
-	Listeners    []Listener `json:"listeners,omitempty"`
-	Routes       []Route    `json:"routes"`
+	HostID          string           `json:"host_id"`
+	ObservedAt      time.Time        `json:"observed_at"`
+	OS              string           `json:"os"`
+	Architecture    string           `json:"architecture"`
+	Sources         []Source         `json:"sources"`
+	Workloads       []Workload       `json:"workloads"`
+	Listeners       []Listener       `json:"listeners,omitempty"`
+	Routes          []Route          `json:"routes"`
+	Connections     []Connection     `json:"connections,omitempty"`
+	ConnectionIssue string           `json:"connection_issue,omitempty"`
+	BackupArtifacts []BackupArtifact `json:"backup_artifacts,omitempty"`
+	RecoveryReports []RecoveryReport `json:"recovery_reports,omitempty"`
+	BackupIssues    []string         `json:"backup_issues,omitempty"`
+}
+
+type BackupArtifact struct {
+	WorkloadID string    `json:"workload_id"`
+	Container  string    `json:"container"`
+	Path       string    `json:"path"`
+	Format     string    `json:"format"`
+	SizeBytes  int64     `json:"size_bytes"`
+	ModifiedAt time.Time `json:"modified_at"`
+}
+type RecoveryReport struct {
+	Version int             `json:"version"`
+	Kind    string          `json:"kind"`
+	Domains []string        `json:"domains"`
+	Record  json.RawMessage `json:"record"`
+}
+
+type Connection struct {
+	From    string `json:"from"`
+	To      string `json:"to,omitempty"`
+	Address string `json:"address"`
+	Port    int    `json:"port"`
+	Kind    string `json:"kind"` // declared or established
 }
 
 type Site struct {

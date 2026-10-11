@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,28 +9,26 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/Shumair99/host-ops/internal/agent"
 	"github.com/Shumair99/host-ops/internal/collector"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/discovery"
-	"github.com/Shumair99/host-ops/internal/storage"
 	"github.com/Shumair99/host-ops/internal/tui"
 )
 
 func defaultConnectionConfig() string {
-	if path := os.Getenv("HOSTOPS_CONFIG"); path != "" {
-		return path
-	}
-	if _, err := os.Stat("hostops.json"); err == nil {
-		return "hostops.json"
-	}
-	return "local/hostops.json"
+	path, _ := config.DefaultPath()
+	return path
 }
 
 func startCommand(ctx context.Context, args []string, input io.Reader, out, errOut io.Writer) int {
+	return startWithServices(ctx, args, input, out, errOut, setupServices{PrepareSSH: prepareSetupSSH, Discover: discoverSetup, Dashboard: tui.Run})
+}
+
+func startWithServices(ctx context.Context, args []string, input io.Reader, out, errOut io.Writer, services setupServices) int {
 	flags := flag.NewFlagSet("start", flag.ContinueOnError)
 	flags.SetOutput(errOut)
 	path := flags.String("config", defaultConnectionConfig(), "connection settings")
@@ -45,6 +42,7 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 	color := flags.String("color", "auto", "terminal color: auto, always, never")
 	once := flags.Bool("once", false, "print one dashboard frame and exit")
 	noCollect := flags.Bool("no-collect", false, "disable automatic cycles")
+	demo := flags.Bool("demo", false, "try the dashboard offline without changing settings")
 	target := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		target, args = args[0], args[1:]
@@ -62,6 +60,17 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 		fmt.Fprintln(errOut, "public HTTP check interval must be at least 5s")
 		return 1
 	}
+	if *demo {
+		if err := services.Dashboard(ctx, config.Config{}, ":memory:", tui.Options{Demo: true, Interval: *interval, Once: *once, Page: *page, Color: *color}, input, out); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+		return 0
+	}
+	if *path == "" {
+		fmt.Fprintln(errOut, "user configuration directory unavailable; pass --config FILE")
+		return 1
+	}
 	if resolved, ok := resolveHistoryPath(*db, errOut); ok {
 		*db = resolved
 	} else {
@@ -75,7 +84,10 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 		return 1
 	}
 	if newConnection {
-		fmt.Fprintln(out, "HostOps uses SSH keys from your agent/config and a host key already trusted by SSH; it does not ask for or store SSH passwords.")
+		fmt.Fprintln(out, "\nHOSTOPS / First-time setup")
+		fmt.Fprintln(out, "Connect your Linux VPS. HostOps discovers its websites, workloads and routes automatically.")
+		fmt.Fprintln(out, "Use an SSH key already authorized on your VPS, or an existing SSH connection alias.")
+		fmt.Fprintln(out, "\n1 / Connection")
 		if target == "" {
 			target, err = askLine(input, out, "VPS SSH target (user@host): ")
 			if err != nil {
@@ -88,7 +100,32 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 			}
 		}
 		if *identity == "" {
-			*identity, err = askLine(input, out, "SSH private key path (blank uses SSH config/agent): ")
+			*identity, err = askLine(input, out, "SSH private key path (blank uses SSH config / agent): ")
+			if err != nil {
+				fmt.Fprintln(errOut, err)
+				return 1
+			}
+		}
+		if *port == 0 {
+			for {
+				answer, promptErr := askLine(input, out, "SSH port (blank uses SSH config / 22): ")
+				if promptErr != nil {
+					fmt.Fprintln(errOut, promptErr)
+					return 1
+				}
+				if answer == "" {
+					break
+				}
+				p, parseErr := strconv.Atoi(answer)
+				if parseErr == nil && p >= 1 && p <= 65535 {
+					*port = p
+					break
+				}
+				fmt.Fprintln(out, "Enter a port from 1 to 65535, or press Enter for the default.")
+			}
+		}
+		if *identity != "" {
+			*identity, err = setupIdentity(*identity)
 			if err != nil {
 				fmt.Fprintln(errOut, err)
 				return 1
@@ -104,7 +141,11 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 			return 1
 		}
 		if *identity != "" {
-			c.Host.IdentityFile = *identity
+			c.Host.IdentityFile, err = setupIdentity(*identity)
+			if err != nil {
+				fmt.Fprintln(errOut, err)
+				return 1
+			}
 		}
 		if *port != 0 {
 			c.Host.SSHPort = *port
@@ -123,35 +164,33 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 	}
 
 	if newConnection {
-		fmt.Fprintln(out, "Connecting over SSH and discovering VPS workloads. SSH key authentication and a trusted host key are required.")
-		store, openErr := storage.Open(*db)
-		if openErr != nil {
-			fmt.Fprintln(errOut, openErr)
+		fmt.Fprintln(out, "\n2 / Verify connection and discover")
+		if err = services.PrepareSSH(ctx, c, input, out, errOut); err != nil {
+			fmt.Fprintln(errOut, err)
 			return 1
 		}
-		err = agent.CollectOnce(ctx, c, store)
-		siteCount := 0
-		if err == nil {
-			var resolved config.Config
-			resolved, err = agent.ResolveConfig(ctx, c, store)
-			if err == nil {
-				siteCount = len(resolved.Sites)
-			}
-		}
-		closeErr := store.Close()
-		if err == nil {
-			err = closeErr
-		}
+		fmt.Fprintln(out, "Connected. Scanning supported runtimes, proxy routes and services…")
+		var inventory discovery.Registry
+		inventory, err = services.Discover(ctx, c, *db)
 		if err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
 		}
-		fmt.Fprintf(out, "Discovered %d production properties.\n", siteCount)
+		printSetupInventory(out, inventory)
+		// Save a successfully discovered connection before optional choices, so
+		// interruption or declined extras do not discard the completed setup.
+		c.Host.HistoryMode = ""
+		if err = saveConnectionConfig(*path, c); err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(out, "Opening saved VPS connection: %s\n", c.Host.Name)
 	}
 
 	if c.Host.HistoryMode == "" {
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "Optional VPS history")
+		fmt.Fprintln(out, "3 / Optional background history")
 		fmt.Fprintln(out, "  Keeps a rolling 30-minute window of CPU, memory, load, and root-disk samples.")
 		fmt.Fprintln(out, "  Samples once per second; checkpoints every 15 seconds; opens no network port.")
 		fmt.Fprintln(out, "  Installation uses root privileges to create a locked account and install the service.")
@@ -192,7 +231,26 @@ func startCommand(ctx context.Context, args []string, input io.Reader, out, errO
 			return 1
 		}
 	}
-	if err = tui.Run(ctx, c, *db, tui.Options{Interval: *interval, Once: *once, NoCollect: *noCollect, Page: *page, Color: *color}, input, out); err != nil {
+	setupBilling := false
+	if newConnection && !*once {
+		setupBilling, err = askYesNo(input, out, "Set up a monthly budget or provider billing in the dashboard? [y/N] ", false)
+		if err != nil {
+			fmt.Fprintln(errOut, err)
+			return 1
+		}
+	}
+	if err = saveConnectionConfig(*path, c); err != nil {
+		fmt.Fprintln(errOut, err)
+		return 1
+	}
+	if newConnection {
+		fmt.Fprintf(out, "\n4 / Ready\nSettings saved: %s\n", *path)
+		fmt.Fprintln(out, "Opening the dashboard. Check Inventory for discovery coverage and Sites for your domains.")
+		fmt.Fprintln(out, "Export for AI is at the bottom of Views: Enter reviews, then Enter confirms the Markdown export.")
+		fmt.Fprintln(out, "Next time, run hostops start from any folder.")
+		fmt.Fprintln(out)
+	}
+	if err = services.Dashboard(ctx, c, *db, tui.Options{Interval: *interval, Once: *once, NoCollect: *noCollect, Page: *page, Color: *color, ConfigPath: *path, SetupBilling: setupBilling}, input, out); err != nil {
 		fmt.Fprintln(errOut, err)
 		return 1
 	}
@@ -359,21 +417,29 @@ func askYesNo(input io.Reader, out io.Writer, prompt string, defaultYes bool) (b
 }
 
 func saveConnectionConfig(path string, c config.Config) error {
-	if err := c.Validate(); err != nil {
-		return err
+	return config.Save(path, c)
+}
+
+func setupIdentity(raw string) (string, error) {
+	raw = strings.Trim(strings.TrimSpace(raw), "\"'")
+	if raw == "~" || strings.HasPrefix(raw, "~/") || strings.HasPrefix(raw, "~\\") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		if raw == "~" {
+			raw = home
+		} else {
+			raw = filepath.Join(home, raw[2:])
+		}
 	}
-	data, err := json.MarshalIndent(c, "", "  ")
+	path, err := filepath.Abs(raw)
 	if err != nil {
-		return fmt.Errorf("encode connection settings: %w", err)
+		return "", fmt.Errorf("SSH key path is invalid")
 	}
-	if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return fmt.Errorf("create connection settings directory: %w", err)
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("SSH key file was not found; supply its path or leave it blank to use your SSH agent/config")
 	}
-	if err = os.WriteFile(path, append(data, '\n'), 0600); err != nil {
-		return fmt.Errorf("save connection settings: %w", err)
-	}
-	if err = os.Chmod(path, 0600); err != nil {
-		return fmt.Errorf("secure connection settings: %w", err)
-	}
-	return nil
+	return path, nil
 }

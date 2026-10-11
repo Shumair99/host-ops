@@ -4,6 +4,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/console"
 	"github.com/Shumair99/host-ops/internal/discovery"
+	"sort"
 	"strings"
 )
 
@@ -20,7 +21,9 @@ func inventoryLines(registry discovery.Registry) []string {
 		lines = append(lines, workload.Type+" / "+workload.Name+" / "+workload.Status+" / "+workload.Project)
 	}
 	lines = append(lines, "", "SITE ROUTES")
-	for _, site := range registry.Sites {
+	sites := append([]discovery.Site(nil), registry.Sites...)
+	sort.SliceStable(sites, func(i, j int) bool { return config.DomainLess(sites[i].Domain, sites[j].Domain) })
+	for _, site := range sites {
 		lines = append(lines, site.Domain+" / "+site.State)
 		for _, route := range site.Routes {
 			lines = append(lines, "  "+route.Kind+" "+strings.Join(route.Paths, ",")+" -> "+strings.Join(route.Upstreams, ",")+route.Root)
@@ -37,10 +40,18 @@ func inventoryLines(registry discovery.Registry) []string {
 }
 
 func (m dashboard) rawSites() []config.Site {
+	var sites []config.Site
 	if m.snapshot.Sites != nil {
-		return m.snapshot.Sites
+		sites = config.OrderedSites(m.snapshot.Sites)
+	} else {
+		sites = config.OrderedSites(m.source.Config.Sites)
 	}
-	return m.source.Config.Sites
+	for i := range sites {
+		if sites[i].Proxy.Domain != "" {
+			sites[i].Name = sites[i].Proxy.Domain
+		}
+	}
+	return sites
 }
 
 func (m dashboard) sites() []config.Site {

@@ -40,9 +40,24 @@ func ConfigSites(registry Registry, base config.Config) config.Config {
 						dependencies[key] = true
 					}
 				}
+				for network := range w.Networks {
+					dependencies[network] = true
+					dependencies["network:"+network] = true
+					dependencies[strings.TrimPrefix(strings.TrimPrefix(network, "docker:"), "podman:")] = true
+				}
+				for _, mount := range w.Mounts {
+					dependencies["storage:"+mount.Source] = true
+				}
+				for _, connection := range registry.Snapshot.Connections {
+					if connection.From == id && connection.Kind == "peer" {
+						address := net.JoinHostPort(connection.Address, strconv.Itoa(connection.Port))
+						dependencies[address] = true
+						dependencies["endpoint:"+address] = true
+					}
+				}
 			}
 		}
-		for _, id := range item.WorkloadIDs {
+		for _, id := range WorkloadDependencies(registry.Snapshot, item.WorkloadIDs) {
 			addWorkload(id)
 		}
 		for _, route := range item.Routes {
@@ -69,6 +84,7 @@ func ConfigSites(registry Registry, base config.Config) config.Config {
 			}
 		}
 		if len(item.WorkloadIDs) == 1 {
+			// Runtime resolution remains independent of redirect presentation.
 			w := workloads[item.WorkloadIDs[0]]
 			s.Runtime.Type = w.Type
 			if w.Type == "docker" || w.Type == "podman" {
@@ -86,6 +102,30 @@ func ConfigSites(registry Registry, base config.Config) config.Config {
 			}
 			_, port, _ := net.SplitHostPort(s.Proxy.Upstream)
 			s.Runtime.Port, _ = strconv.Atoi(port)
+		}
+		redirectTarget := ""
+		redirectOnly := len(item.Routes) > 0
+		for _, route := range item.Routes {
+			if route.Kind != "redirect" || len(route.Paths) > 0 || route.Note != "" {
+				redirectOnly = false
+				break
+			}
+			target := redirectHost(route.RedirectTo)
+			if target == "" {
+				redirectOnly = false
+				break
+			}
+			if target == item.Domain {
+				continue
+			}
+			if redirectTarget != "" && redirectTarget != target {
+				redirectOnly = false
+				break
+			}
+			redirectTarget = target
+		}
+		if redirectOnly {
+			s.Proxy.RedirectTo = redirectTarget
 		}
 		if old, ok := manual[item.Domain]; ok {
 			s.ID, s.Name, s.Repository, s.Branch, s.Business, s.Recovery = old.ID, old.Name, old.Repository, old.Branch, old.Business, old.Recovery
@@ -107,7 +147,47 @@ func ConfigSites(registry Registry, base config.Config) config.Config {
 			out = append(out, s)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	base.Sites = out
+	// A redirect has no separate application runtime, but visitors still depend
+	// on its destination. Follow only explicit, inventoried redirect targets.
+	byDomain := map[string]config.Site{}
+	for _, site := range out {
+		byDomain[site.Proxy.Domain] = site
+	}
+	for i := range out {
+		dependencies := map[string]bool{}
+		for _, dep := range out[i].Dependencies {
+			dependencies[dep] = true
+		}
+		seen := map[string]bool{out[i].Proxy.Domain: true}
+		target := out[i].Proxy.RedirectTo
+		for target != "" && !seen[target] {
+			seen[target] = true
+			site, exists := byDomain[target]
+			if !exists {
+				break
+			}
+			dependencies[site.ID], dependencies[site.Proxy.Domain] = true, true
+			for _, dep := range site.Dependencies {
+				dependencies[dep] = true
+			}
+			target = site.Proxy.RedirectTo
+		}
+		out[i].Dependencies = out[i].Dependencies[:0]
+		for dep := range dependencies {
+			out[i].Dependencies = append(out[i].Dependencies, dep)
+		}
+		sort.Strings(out[i].Dependencies)
+	}
+	base.Sites = config.OrderedSites(out)
 	return base
+}
+
+func redirectHost(address string) string {
+	address = strings.ReplaceAll(address, "{http.request.uri}", "/")
+	address = strings.ReplaceAll(address, "{uri}", "/")
+	u, err := url.Parse(address)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
 }

@@ -3,10 +3,10 @@ package tui
 import (
 	"fmt"
 	"math"
-	"sort"
 	"strings"
 	"time"
 
+	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/console"
 	"github.com/Shumair99/host-ops/internal/metrics"
 	"github.com/Shumair99/host-ops/internal/model"
@@ -35,64 +35,8 @@ func durationLabel(seconds float64) string {
 	}
 	return d.Round(time.Minute).String()
 }
-func (m dashboard) overviewLines(w int) []string {
-	out := m.resourcePanels(w)
-	out = append(out, m.systemSummary(w)...)
-	out = append(out, "")
-	out = append(out, m.overviewSiteTable(w)...)
-	events := []string{}
-	for _, r := range m.snapshot.Events[:min(4, len(m.snapshot.Events))] {
-		label := recordLabel(r, m.snapshot.Sites)
-		events = append(events, clip(m.theme.paint(r.ObservedAt.Local().Format("15:04"), muted)+"  "+m.theme.paint(pad(label, min(28, max(12, w/3))), cyan)+"  "+m.theme.paint(activitySummary(r), ink), w-4))
-	}
-	if len(events) == 0 {
-		events = []string{m.theme.paint("No recorded changes in 24h", muted)}
-	}
-	out = append(out, "")
-	title := "Recent activity"
-	if len(m.snapshot.Events) > 0 {
-		title += " / last change " + ageLabel(m.snapshot.Events[0].ObservedAt)
-	}
-	return append(out, m.theme.panel(title, events, w)...)
-}
-func (m dashboard) resourcePanels(w int) []string {
-	t := m.theme
-	specs := []struct {
-		label, key string
-		color      int
-	}{{"CPU", "cpu_percent", cyan}, {"Memory", "memory_percent", violet}, {"Root disk", "disk_percent", amber}}
-	if w < 76 {
-		rows := []string{}
-		for _, s := range specs {
-			n := value(m.snapshot.Host.Values, s.key)
-			color := metricColor(n, s.color)
-			rows = append(rows, t.paint(pad(s.label, 10), muted)+" "+t.meter(n, max(4, w-26), color)+" "+t.strong(pad(percent(n), 7), color))
-		}
-		if n := value(m.snapshot.Host.Values, "disk_free_bytes"); n != nil {
-			rows = append(rows, t.paint("Disk available", muted)+"  "+t.strong(console.Bytes(*n), amber))
-		}
-		return t.panel("Host resources", rows, w)
-	}
-	sizes := []int{(w - 2) / 3, (w - 2) / 3, w - 2 - 2*((w-2)/3)}
-	cards := [][]string{}
-	for i, s := range specs {
-		n := value(m.snapshot.Host.Values, s.key)
-		c := metricColor(n, s.color)
-		inside := sizes[i] - 4
-		detail := "Host utilization"
-		if s.key == "memory_percent" {
-			detail = m.bytePair("memory_used_bytes", "memory_total_bytes")
-		}
-		if s.key == "disk_percent" {
-			detail = "Available " + m.byteValue("disk_free_bytes")
-		}
-		rows := []string{t.strong(percent(n), c) + "  " + t.paint("used", muted), t.meter(n, inside, c), t.paint(detail, muted)}
-		rows = append(rows, m.spark(s.key, inside, c)...)
-		rows = append(rows, t.paint(overviewTrendLabel(inside), muted))
-		cards = append(cards, t.panel(s.label, rows, sizes[i]))
-	}
-	return columns(columns(cards[0], cards[1], sizes[0], sizes[1]), cards[2], sizes[0]+sizes[1]+1, sizes[2])
-}
+func (m dashboard) overviewLines(w int) []string  { return m.overviewWorkspace(w) }
+func (m dashboard) resourcePanels(w int) []string { return m.resourceCanvas(w) }
 func (m dashboard) byteValue(key string) string {
 	if n := value(m.snapshot.Host.Values, key); n != nil {
 		return console.Bytes(*n)
@@ -101,7 +45,7 @@ func (m dashboard) byteValue(key string) string {
 }
 func (m dashboard) bytePair(a, b string) string { return m.byteValue(a) + " / " + m.byteValue(b) }
 func (m dashboard) spark(key string, width, color int) []string {
-	buckets := recentBuckets(m.snapshot.History, key, width, time.Now())
+	buckets := recentBuckets(m.snapshot.History, key, width, retainedWindowEnd(m.snapshot.History, time.Now()))
 	count := 0
 	for _, v := range buckets {
 		if v != nil {
@@ -119,6 +63,21 @@ func (m dashboard) spark(key string, width, color int) []string {
 }
 
 const overviewTrendWindow = 30 * time.Minute
+
+// Keep history geometry and scale steady while only the live readout changes.
+// The axis records the saved sample time; an expired history window stays empty.
+func retainedWindowEnd(samples []metrics.Sample, now time.Time) time.Time {
+	latest := time.Time{}
+	for _, s := range samples {
+		if !s.ObservedAt.After(now) && s.ObservedAt.After(latest) {
+			latest = s.ObservedAt
+		}
+	}
+	if latest.IsZero() || latest.Before(now.Add(-overviewTrendWindow)) {
+		return now
+	}
+	return latest
+}
 
 // recentBuckets aligns the Overview window to fixed time buckets. The grid
 // stays still between bucket boundaries, so a redraw cannot make samples jump
@@ -262,44 +221,7 @@ func (m dashboard) trendPanel(label, key string, color, w int) []string {
 	rows = append(rows, m.theme.paint("       "+first.Local().Format("15:04")+strings.Repeat(" ", max(1, plotWidth-10))+last.Local().Format("15:04"), muted))
 	return m.theme.panel(label, rows, w)
 }
-func (m dashboard) hostLines(w int) []string {
-	out := m.resourcePanels(w)
-	out = append(out, "")
-	if w >= 76 {
-		a := (w - 1) / 2
-		out = append(out, columns(m.trendPanel("CPU history / %", "cpu_percent", cyan, a), m.trendPanel("Memory history / %", "memory_percent", violet, w-a-1), a, w-a-1)...)
-	} else {
-		out = append(out, m.trendPanel("CPU history / %", "cpu_percent", cyan, w)...)
-		out = append(out, m.trendPanel("Memory history / %", "memory_percent", violet, w)...)
-	}
-	uptime := "—"
-	if n := value(m.snapshot.Host.Values, "uptime_seconds"); n != nil {
-		uptime = durationLabel(*n)
-	}
-	rows := []string{m.theme.paint("Uptime", muted) + "  " + uptime, "Memory  " + m.bytePair("memory_used_bytes", "memory_total_bytes"), "Storage " + m.bytePair("disk_used_bytes", "disk_total_bytes")}
-	known := map[string]bool{"cpu_percent": true, "memory_percent": true, "disk_percent": true, "uptime_seconds": true, "memory_used_bytes": true, "memory_total_bytes": true, "disk_used_bytes": true, "disk_total_bytes": true, "disk_free_bytes": true, "disk_observed_unix_seconds": true}
-	keys := []string{}
-	for key := range m.snapshot.Host.Values {
-		if !known[key] {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		n := m.snapshot.Host.Values[key]
-		v := fmt.Sprintf("%.2f", n)
-		if strings.HasSuffix(key, "bytes") {
-			v = console.Bytes(n)
-		}
-		rows = append(rows, pad(clean(strings.ReplaceAll(key, "_", " ")), 24)+" "+m.theme.paint(v, cyan))
-	}
-	for _, issue := range m.snapshot.Host.Unavailable {
-		rows = append(rows, m.theme.paint("Unavailable · "+clean(issue), amber))
-	}
-	out = append(out, "")
-	out = append(out, m.theme.panel("System", rows, w)...)
-	return append(out, m.workloadPanel(w)...)
-}
+func (m dashboard) hostLines(w int) []string { return m.hostWorkspace(w) }
 func layerState(r model.Report, layer string) model.State {
 	state := model.Skip
 	found := false
@@ -334,7 +256,7 @@ func httpLatency(r model.Report) string {
 	return fmt.Sprintf("%.0f ms", n)
 }
 
-var checkLabels = map[string]string{"runtime": "Runtime", "local_http": "Local HTTP", "proxy_route": "Proxy route", "dns": "DNS", "tls": "TLS", "public_http": "Public HTTP", "container_health": "Container health", "collector": "Collector"}
+var checkLabels = map[string]string{"runtime": "Runtime", "local_http": "Local HTTP", "proxy_route": "Proxy route", "dns": "DNS", "tls": "TLS", "tcp": "TCP", "registration": "Registration", "public_http": "Public HTTP", "container_health": "Container health", "collector": "Collector"}
 
 func layerLabel(key string) string {
 	if label, ok := checkLabels[key]; ok {
@@ -352,9 +274,26 @@ func (m dashboard) checkRows(checks []model.Check, w int) []string {
 		if c.LatencyMS > 0 {
 			title += m.theme.paint(fmt.Sprintf("  %.0f ms", c.LatencyMS), muted)
 		}
+		if (c.Layer == "dns" || c.Layer == "tcp" || c.Layer == "tls") && !c.ObservedAt.IsZero() {
+			title += m.theme.paint("  "+ageLabel(c.ObservedAt), muted)
+		}
 		rows = append(rows, title)
 		if c.State != model.Pass && c.State != model.Skip {
 			rows = append(rows, wrap([]string{m.theme.paint(clean(c.Summary), statusColor(string(c.State)))}, w-4)...)
+		}
+		if c.State == model.Skip && c.Code != "" {
+			rows = append(rows, wrap([]string{m.theme.paint(clean(c.Summary), muted)}, w-4)...)
+		}
+		if c.Layer == "registration" {
+			if c.State == model.Pass {
+				rows = append(rows, wrap([]string{m.theme.paint(clean(c.Summary), muted)}, w-4)...)
+			}
+			for _, detail := range c.Details {
+				rows = append(rows, wrap([]string{m.theme.paint(clean(detail), muted)}, w-4)...)
+			}
+			if !c.ObservedAt.IsZero() {
+				rows = append(rows, m.theme.paint("Registry evidence "+ageLabel(c.ObservedAt), muted))
+			}
 		}
 	}
 	return rows
@@ -365,29 +304,36 @@ func (m dashboard) inspectorLines(w int) []string {
 	if group.Primary.ID == "" {
 		return m.theme.panel("Property", []string{"No active property selected"}, w)
 	}
-	out := []string{}
+	selected := group.Primary
+	for _, s := range group.Children {
+		if s.ID == m.siteID {
+			selected = s
+		}
+	}
+	out := m.inspectorSummary(selected, w)
+	if len(m.workloadReadings(group.domains())) > 1 {
+		out = append(out, m.theme.panel("Property workloads", m.propertyWorkloadRows(group, w), w)...)
+	}
+	domains := []config.Site{selected}
 	for _, s := range group.domains() {
+		if s.ID != selected.ID {
+			domains = append(domains, s)
+		}
+	}
+	for _, s := range domains {
 		r := domainReport(s, byID)
 		rows := []string{m.theme.badge(r.Overall) + m.theme.paint("  "+ageLabel(r.ObservedAt), muted)}
 		rows = append(rows, m.checkRows(r.Checks, w)...)
 		rows = append(rows, m.theme.paint("Endpoint  "+clean(unknown(s.Health.PublicURL)), muted))
 		out = append(out, m.theme.panel(clean(s.Proxy.Domain), rows, w)...)
 		out = append(out, "")
-		if len(r.Diagnoses) > 0 {
-			diagnoses := []string{}
-			for _, d := range r.Diagnoses {
-				diagnoses = append(diagnoses, wrap([]string{m.theme.strong(clean(d.Finding), amber)}, w-4)...)
-				for _, e := range d.Evidence {
-					diagnoses = append(diagnoses, wrap([]string{clean(e)}, w-4)...)
-				}
-				diagnoses = append(diagnoses, wrap([]string{m.theme.paint("Next  "+clean(d.Investigation), muted)}, w-4)...)
-			}
-			out = append(out, m.theme.panel("Diagnosis", diagnoses, w)...)
+		if findings := reportFindings(r); len(findings) > 0 {
+			out = append(out, m.theme.panel("Findings / evidence", m.findingRows(findings, w), w)...)
 		}
 	}
-	r := domainReport(group.Primary, byID)
-	s := group.Primary
-	fields := [][2]string{{"Runtime", s.Runtime.Type + " / " + r.Runtime.Status}, {"Upstream", s.Proxy.Upstream}, {"Image", r.Runtime.Image}, {"Revision", r.Runtime.Commit}, {"Restart policy", r.Runtime.RestartPolicy}, {"Repository", s.Repository}, {"Branch", s.Branch}}
+	r := domainReport(selected, byID)
+	s := selected
+	fields := [][2]string{{"Restart policy", r.Runtime.RestartPolicy}, {"Repository", s.Repository}, {"Branch", s.Branch}, {"Runtime user", r.Runtime.User}}
 	rows := []string{}
 	for _, f := range fields {
 		v := clean(f[1])
@@ -396,16 +342,16 @@ func (m dashboard) inspectorLines(w int) []string {
 		}
 		rows = append(rows, wrap([]string{m.theme.paint(pad(f[0], 15), muted) + " " + v}, w-4)...)
 	}
-	return append(out, m.theme.panel("SITE PASSPORT", rows, w)...)
+	return append(out, m.theme.panel("Deployment identity", rows, w)...)
 }
 func (m dashboard) workloadPanel(w int) []string {
-	rows := []string{m.theme.paint(pad("PROPERTY", max(12, w-32))+" "+pad("CPU", 8)+" MEMORY", muted)}
-	for _, s := range m.sites() {
-		sample, ok := m.snapshot.Workloads[s.ID]
-		if !ok {
+	rows := []string{m.theme.paint(pad("WORKLOAD", max(12, w-32))+" "+pad("CPU", 8)+" MEMORY", muted)}
+	for _, r := range m.workloadReadings(m.rawSites()) {
+		sample := r.Sample
+		if len(sample.Values) == 0 {
 			continue
 		}
-		name := s.Name
+		name := r.Label
 		mem := "—"
 		if n := value(sample.Values, "memory_used_bytes"); n != nil {
 			mem = console.Bytes(*n)
@@ -421,7 +367,8 @@ func (m dashboard) inventoryPanel(w int) []string {
 	t := m.theme
 	r := m.snapshot.Inventory
 	rows := []string{fmt.Sprintf("%d workloads   %d domains   %d routes", len(r.Snapshot.Workloads), len(r.Sites), len(r.Snapshot.Routes)), t.paint(clean(r.Snapshot.OS+" / "+r.Snapshot.Architecture)+"  "+ageLabel(r.Snapshot.ObservedAt), muted)}
-	out := t.panel("Discovery", rows, w)
+	out := m.discoveryTopology(w)
+	out = append(out, t.panel("Discovery", rows, w)...)
 	rows = []string{}
 	for _, s := range r.Snapshot.Sources {
 		rows = append(rows, t.badge(s.State)+"  "+clean(s.ID)+"  "+t.paint(clean(s.Mode), muted))
@@ -481,5 +428,23 @@ func (m dashboard) toolsPanel(w int) []string {
 		}
 		rows = append(rows, line)
 	}
-	return m.theme.panel("Optional tools", rows, w)
+	if w >= 88 {
+		a := max(30, (w-1)*2/5)
+		compact := []string{}
+		for i, item := range toolMenu {
+			line := m.theme.paint(item.Key, cyan) + "  " + item.Label
+			if i == m.toolSelected && !m.menuFocus {
+				line = m.theme.selection(line, a-4)
+			}
+			compact = append(compact, line)
+		}
+		selected := toolMenu[min(m.toolSelected, len(toolMenu)-1)]
+		detail := []string{m.theme.strong(selected.Label, ink), m.theme.paint(viewHints[selected.Page], muted), ""}
+		for _, line := range toolExplanations[selected.Page] {
+			detail = append(detail, line)
+		}
+		detail = append(detail, "", m.theme.paint("Enter open · "+selected.Key+" direct shortcut · Esc return", muted))
+		return columns(m.theme.panel("Tools", compact, a), m.theme.panel("Selected tool", detail, w-a-1), a, w-a-1)
+	}
+	return m.theme.panel("Tools", rows, w)
 }

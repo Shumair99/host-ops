@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/Shumair99/host-ops/internal/capacity"
 	"github.com/Shumair99/host-ops/internal/config"
+	"github.com/Shumair99/host-ops/internal/discovery"
 	"github.com/Shumair99/host-ops/internal/model"
 	"github.com/Shumair99/host-ops/internal/platform"
 	"github.com/Shumair99/host-ops/internal/recovery"
@@ -16,11 +17,26 @@ import (
 )
 
 type Impact struct {
-	HostID       string        `json:"host_id"`
-	Resource     string        `json:"resource"`
-	Affected     []config.Site `json:"affected"`
-	Dependencies []string      `json:"dependencies"`
-	Notes        []string      `json:"notes"`
+	HostID       string              `json:"host_id"`
+	Resource     string              `json:"resource"`
+	Affected     []config.Site       `json:"affected"`
+	Dependencies []string            `json:"dependencies"`
+	Notes        []string            `json:"notes"`
+	Graph        *discovery.Topology `json:"graph,omitempty"`
+}
+
+func DependencyInventory(c config.Config, resource string, reg discovery.Registry) (Impact, error) {
+	r, err := Dependency(c, resource)
+	g := discovery.Graph(reg)
+	r.Graph = &g
+	if err != nil {
+		for _, n := range g.Nodes {
+			if n.ID == resource || n.Label == resource {
+				return r, nil
+			}
+		}
+	}
+	return r, err
 }
 
 func Dependency(c config.Config, resource string) (Impact, error) {
@@ -28,7 +44,7 @@ func Dependency(c config.Config, resource string) (Impact, error) {
 	known := false
 	dependencies := map[string]bool{"host:" + c.Host.ID: true}
 	for _, s := range c.Sites {
-		affects := resource == "host" || resource == c.Host.ID || resource == s.ID || resource == s.Runtime.Container || resource == s.Runtime.Unit || resource == s.Runtime.Directory || resource == s.Proxy.Domain
+		affects := resource == "host" || resource == c.Host.ID || resource == "host:"+c.Host.ID || resource == s.ID || resource == s.Runtime.Container || resource == s.Runtime.Unit || resource == s.Runtime.Directory || resource == s.Proxy.Domain
 		if s.Discovered {
 			for _, dependency := range s.Dependencies {
 				affects = affects || dependency == resource
@@ -94,6 +110,11 @@ func Assess(ctx context.Context, c config.Config, target string, reports []model
 		resource = "host"
 	}
 	impact, err := Dependency(c, resource)
+	if c.Discovering() && store != nil {
+		if reg, e := store.Inventory(ctx, c.Host.ID); e == nil && len(reg.Snapshot.Workloads) > 0 {
+			impact, err = DependencyInventory(c, resource, reg)
+		}
+	}
 	if err != nil {
 		return Report{}, err
 	}
@@ -153,7 +174,7 @@ func Assess(ctx context.Context, c config.Config, target string, reports []model
 		add(site.ID, "site_health", state, summary)
 		if site.Runtime.Type == "docker" {
 			restart := model.Unknown
-			if current.Runtime.Status != "" {
+			if current.Runtime.Status != "" && model.Fresh(current.ObservedAt, time.Now(), model.DefaultMaxAge) {
 				restart = model.Fail
 				if current.Runtime.Status == "running" && (current.Runtime.RestartPolicy == "always" || current.Runtime.RestartPolicy == "unless-stopped") {
 					restart = model.Pass

@@ -18,6 +18,7 @@ type containerMeta struct {
 	Args                  []string
 	Config                struct {
 		Image           string
+		User            *string
 		Labels          map[string]string
 		Cmd, Entrypoint []string
 	}
@@ -29,8 +30,11 @@ type containerMeta struct {
 		StartedAt   string
 	}
 	HostConfig struct {
-		RestartPolicy struct{ Name string }
-		NetworkMode   string
+		RestartPolicy  struct{ Name string }
+		NetworkMode    string
+		Privileged     *bool
+		ReadonlyRootfs *bool
+		Memory         *int64
 	}
 	NetworkSettings struct {
 		Networks map[string]struct {
@@ -43,7 +47,7 @@ type containerMeta struct {
 	Engine string
 }
 
-const discoveryInspect = `{"Id":{{json .Id}},"Name":{{json .Name}},"Path":{{json .Path}},"Args":{{json .Args}},"Image":{{json .Image}},"RestartCount":{{.RestartCount}},"Config":{"Image":{{json .Config.Image}},"Labels":{{json .Config.Labels}}},"State":{"Status":{{json .State.Status}},"Pid":{{.State.Pid}},"StartedAt":{{json .State.StartedAt}},"Health":{{if index .State "Health"}}{"Status":{{json .State.Health.Status}}}{{else}}null{{end}}},"HostConfig":{"RestartPolicy":{"Name":{{json .HostConfig.RestartPolicy.Name}}},"NetworkMode":{{json .HostConfig.NetworkMode}}},"NetworkSettings":{"Networks":{{json .NetworkSettings.Networks}},"Ports":{{json .NetworkSettings.Ports}}},"Mounts":{{json .Mounts}}}`
+const discoveryInspect = `{"Id":{{json .Id}},"Name":{{json .Name}},"Path":{{json .Path}},"Args":{{json .Args}},"Image":{{json .Image}},"RestartCount":{{.RestartCount}},"Config":{"Image":{{json .Config.Image}},"User":{{json .Config.User}},"Labels":{{json .Config.Labels}}},"State":{"Status":{{json .State.Status}},"Pid":{{.State.Pid}},"StartedAt":{{json .State.StartedAt}},"Health":{{if index .State "Health"}}{"Status":{{json .State.Health.Status}}}{{else}}null{{end}}},"HostConfig":{"Privileged":{{.HostConfig.Privileged}},"ReadonlyRootfs":{{.HostConfig.ReadonlyRootfs}},"Memory":{{.HostConfig.Memory}},"RestartPolicy":{"Name":{{json .HostConfig.RestartPolicy.Name}}},"NetworkMode":{{json .HostConfig.NetworkMode}}},"NetworkSettings":{"Networks":{{json .NetworkSettings.Networks}},"Ports":{{json .NetworkSettings.Ports}}},"Mounts":{{json .Mounts}}}`
 
 func readRuntime(ctx context.Context, runner platform.Runner, engine string, snapshot *discovery.Snapshot) []containerMeta {
 	source := discovery.Source{ID: "runtime/" + engine, Kind: engine, Mode: "active", State: "ready", ObservedAt: snapshot.ObservedAt}
@@ -88,6 +92,15 @@ func readRuntime(ctx context.Context, runner platform.Runner, engine string, sna
 			// Replicas share a service; retain their individual instances in the graph.
 			w := discovery.Workload{ID: discovery.StableID("workload", snapshot.HostID+"|"+engine+"|"+identity+"|"+meta.Name), InstanceID: meta.ID, SourceID: source.ID, Type: engine, Name: meta.Name, Project: project, Service: service, Image: meta.Config.Image, Revision: meta.Config.Labels["org.opencontainers.image.revision"], Status: meta.State.Status, Health: "none", RestartPolicy: meta.HostConfig.RestartPolicy.Name, Networks: map[string]discovery.Network{}, Ports: map[string][]string{}, PID: meta.State.Pid, ProxyKind: proxyKind(meta.Path, meta.Config.Image)}
 			w.ImageID, w.RestartCount, w.StartedAt = meta.Image, meta.RestartCount, meta.State.StartedAt
+			w.Directory = meta.Config.Labels["com.docker.compose.project.working_dir"]
+			w.NetworkMode = meta.HostConfig.NetworkMode
+			if meta.State.Status == "running" && meta.State.Pid > 0 {
+				w.Processes = processIdentities(ctx, runner, engine, meta.Name, meta.State.Pid)
+			}
+			if meta.Config.User != nil && meta.HostConfig.Privileged != nil && meta.HostConfig.ReadonlyRootfs != nil && meta.HostConfig.Memory != nil {
+				w.PostureObserved = true
+				w.User, w.Privileged, w.ReadOnly, w.MemoryLimit = *meta.Config.User, *meta.HostConfig.Privileged, *meta.HostConfig.ReadonlyRootfs, *meta.HostConfig.Memory
+			}
 			if meta.State.Health != nil {
 				w.Health = meta.State.Health.Status
 			}
@@ -114,6 +127,25 @@ func readRuntime(ctx context.Context, runner platform.Runner, engine string, sna
 		}
 	}
 	snapshot.Sources = append(snapshot.Sources, source)
+	for _, meta := range out {
+		from := ""
+		for _, w := range snapshot.Workloads {
+			if w.InstanceID == meta.ID {
+				from = w.ID
+			}
+		}
+		for _, raw := range strings.Split(meta.Config.Labels["com.docker.compose.depends_on"], ",") {
+			service := strings.SplitN(raw, ":", 2)[0]
+			if service == "" {
+				continue
+			}
+			for _, w := range snapshot.Workloads {
+				if w.Project == meta.Config.Labels["com.docker.compose.project"] && w.Service == service {
+					snapshot.Connections = append(snapshot.Connections, discovery.Connection{From: from, To: w.ID, Kind: "declared"})
+				}
+			}
+		}
+	}
 	return out
 }
 

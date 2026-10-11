@@ -28,7 +28,18 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 	encoder := json.NewEncoder(out)
 	encoder.SetIndent("", "  ")
 	if command == "impact" {
-		report, err := preflight.Dependency(c, id)
+		store, err := storage.Open(db)
+		if err != nil {
+			fmt.Fprintln(errOut, "Inventory database unavailable")
+			return 1
+		}
+		defer store.Close()
+		reg, err := store.Inventory(ctx, c.Host.ID)
+		if err != nil {
+			fmt.Fprintln(errOut, "Inventory unavailable")
+			return 1
+		}
+		report, err := preflight.DependencyInventory(c, id, reg)
 		if err != nil {
 			fmt.Fprintln(errOut, err)
 			return 1
@@ -182,7 +193,12 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 			fmt.Fprintln(errOut, "Runtime evidence unavailable")
 			return 1
 		}
-		report := security.Inspect(ctx, c, reports, platform.Command{Host: c.Host})
+		reg, err := store.Inventory(ctx, c.Host.ID)
+		if err != nil {
+			fmt.Fprintln(errOut, "Inventory unavailable")
+			return 1
+		}
+		report := security.InspectInventory(ctx, c, reports, reg, platform.Command{Host: c.Host})
 		if command == "orphans" {
 			encoder.Encode(report.PossibleOrphans)
 		} else {
@@ -209,6 +225,9 @@ func query(ctx context.Context, c config.Config, command, id, db, since string, 
 				return 1
 			}
 			assessments = append(assessments, a)
+		}
+		if id == "" {
+			assessments = readiness.CombineAliases(sites, assessments, reports)
 		}
 		encoder.Encode(assessments)
 		return 0

@@ -80,6 +80,11 @@ func Inspect(ctx context.Context, runner platform.Runner, h config.Host, s confi
 	check := func(layer string, state model.State, summary string) model.Check {
 		return model.Check{HostID: h.ID, SiteID: s.ID, Layer: layer, State: state, Summary: summary}
 	}
+	failedRoute := func(code, summary string) model.Check {
+		c := check("proxy_route", model.Fail, summary)
+		c.Code = code
+		return c
+	}
 	checks := []model.Check{}
 	if h.CaddyContainer != "" {
 		data, err := runner.Run(ctx, "docker", "container", "inspect", "--format", "{{.State.Status}}", "--", h.CaddyContainer)
@@ -113,7 +118,7 @@ func Inspect(ctx context.Context, runner platform.Runner, h config.Host, s confi
 		return append(checks, check("proxy_route", model.Unknown, "Loaded Caddy routes invalid"))
 	}
 	if !found {
-		return append(checks, check("proxy_route", model.Fail, "Expected domain missing from loaded Caddy routes"))
+		return append(checks, failedRoute("proxy_domain_missing", "Expected domain missing from loaded Caddy routes"))
 	}
 	if s.Proxy.Upstream != "" {
 		for _, u := range upstreams {
@@ -121,7 +126,7 @@ func Inspect(ctx context.Context, runner platform.Runner, h config.Host, s confi
 				return append(checks, check("proxy_route", model.Pass, "Loaded upstream: "+u))
 			}
 		}
-		return append(checks, check("proxy_route", model.Fail, fmt.Sprintf("Expected upstream %s; loaded %v", s.Proxy.Upstream, upstreams)))
+		return append(checks, failedRoute("proxy_upstream_mismatch", fmt.Sprintf("Expected upstream %s; loaded %v", s.Proxy.Upstream, upstreams)))
 	}
 	return append(checks, check("proxy_route", model.Pass, "Expected domain present in loaded routes"))
 }

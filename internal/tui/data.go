@@ -9,6 +9,7 @@ import (
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/console"
 	"github.com/Shumair99/host-ops/internal/costs"
+	"github.com/Shumair99/host-ops/internal/diagnostics"
 	"github.com/Shumair99/host-ops/internal/discovery"
 	"github.com/Shumair99/host-ops/internal/incidents"
 	"github.com/Shumair99/host-ops/internal/logs"
@@ -32,6 +33,7 @@ type Snapshot struct {
 	Host          metrics.Sample
 	History       []metrics.Sample
 	Workloads     map[string]metrics.Sample
+	SiteHistory   []metrics.Sample
 	Disk          *metrics.DiskReport
 	DiskScan      agent.DiskScan
 	Detail        any
@@ -40,16 +42,20 @@ type Snapshot struct {
 	HistoryNotice string
 }
 type Source struct {
-	Live    bool
-	Refresh chan struct{}
-	Config  config.Config
-	Store   *storage.Store
-	Demo    bool
-	MaxAge  time.Duration
+	Live          bool
+	LiveStartedAt time.Time
+	Refresh       chan struct{}
+	Config        config.Config
+	Store         *storage.Store
+	Demo          bool
+	MaxAge        time.Duration
 }
 
 func (s Source) Base(ctx context.Context) (Snapshot, error) {
 	var inventory discovery.Registry
+	if s.Demo {
+		inventory = DemoInventory(s.Config)
+	}
 	if !s.Demo && s.Config.Discovering() {
 		var err error
 		inventory, err = s.Store.Inventory(ctx, s.Config.Host.ID)
@@ -58,6 +64,7 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 		}
 		s.Config = discovery.ConfigSites(inventory, s.Config)
 	}
+	s.Config.Sites = config.OrderedSites(s.Config.Sites)
 	reports, err := s.Store.Latest(ctx, s.Config.Host.ID)
 	if err != nil {
 		return Snapshot{}, err
@@ -121,7 +128,23 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 			r.Checks = append(r.Checks, model.Check{Layer: "collector", State: model.Unknown, Summary: "Collector connection unavailable"})
 			r.Overall = model.Overall(r.Checks)
 		}
+		if !s.Demo {
+			correlations := []model.Diagnosis{}
+			for _, d := range r.Diagnoses {
+				if d.Layer == "deployment" {
+					correlations = append(correlations, d)
+				}
+			}
+			r.Diagnoses = append(diagnostics.Diagnose(r), correlations...)
+		}
 		snapshot.Reports = append(snapshot.Reports, r)
+	}
+	if s.Demo {
+		for i, w := range snapshot.Inventory.Snapshot.Workloads {
+			if r, ok := byID[w.ID]; ok {
+				snapshot.Inventory.Snapshot.Workloads[i].Status = r.Runtime.Status
+			}
+		}
 	}
 	host, err := s.Store.Query(ctx, s.Config.Host.ID, "", "host_metrics", time.Time{}, 120)
 	if err != nil {
@@ -156,7 +179,7 @@ func (s Source) Base(ctx context.Context) (Snapshot, error) {
 		}
 	}
 	snapshot.Workloads = map[string]metrics.Sample{}
-	workloads, err := s.Store.Query(ctx, s.Config.Host.ID, "", "metrics", time.Time{}, 200)
+	workloads, err := s.Store.LatestMetrics(ctx, s.Config.Host.ID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -195,6 +218,7 @@ func (s Source) Evidence(ctx context.Context, page, siteID, target string, snaps
 	if err != nil {
 		return nil, err
 	}
+	sites = config.OrderedSites(sites)
 	byID := map[string]model.Report{}
 	for _, r := range snapshot.Reports {
 		byID[r.SiteID] = r
@@ -208,11 +232,25 @@ func (s Source) Evidence(ctx context.Context, page, siteID, target string, snaps
 		return lines, nil
 	case "overview", "sites", "issues":
 		return nil, nil
-	case "tools":
+	case "tools", "export-ai":
 		return nil, nil
 	case "site":
+		snapshot.SiteHistory = nil
 		if len(sites) == 0 {
 			return []string{"Site is no longer in the active inventory."}, nil
+		}
+		if s.Store != nil {
+			records, err := s.Store.Query(ctx, s.Config.Host.ID, siteID, "metrics", time.Now().Add(-30*time.Minute), 120)
+			if err != nil {
+				return nil, err
+			}
+			for i := len(records) - 1; i >= 0; i-- {
+				var sample metrics.Sample
+				if json.Unmarshal(records[i].Data, &sample) == nil {
+					sample.SiteID = siteID
+					snapshot.SiteHistory = append(snapshot.SiteHistory, sample)
+				}
+			}
 		}
 		return groupProperty(groupFor(s.Config.Sites, siteID), byID), nil
 	case "logs":
@@ -246,6 +284,9 @@ func (s Source) Evidence(ctx context.Context, page, siteID, target string, snaps
 			}
 			out = append(out, a)
 		}
+		if siteID == "" {
+			out = readiness.CombineAliases(sites, out, snapshot.Reports)
+		}
 		snapshot.Detail = out
 		return console.Format("readiness", out), nil
 	case "recovery":
@@ -273,7 +314,7 @@ func (s Source) Evidence(ctx context.Context, page, siteID, target string, snaps
 			snapshot.Detail = r
 			return console.Format("security", r), nil
 		}
-		r := security.Inspect(ctx, s.Config, snapshot.Reports, runner)
+		r := security.InspectInventory(ctx, s.Config, snapshot.Reports, snapshot.Inventory, runner)
 		snapshot.Detail = r
 		return console.Format("security", r), nil
 	case "preflight":
@@ -286,7 +327,7 @@ func (s Source) Evidence(ctx context.Context, page, siteID, target string, snaps
 		snapshot.Detail = r
 		return console.Format("preflight", r), err
 	case "impact":
-		r, err := preflight.Dependency(s.Config, target)
+		r, err := preflight.DependencyInventory(s.Config, target, snapshot.Inventory)
 		snapshot.Detail = r
 		return console.Format("impact", r), err
 	case "incidents":
@@ -310,11 +351,13 @@ func (s Source) Evidence(ctx context.Context, page, siteID, target string, snaps
 				return nil, err
 			}
 		}
+		snapshot.Detail = recordFeed{Page: page, Records: records}
 		return timelineLines(page, records, timelineLabels(s.Config.Sites)), nil
 	}
 }
 
 func property(site config.Site, r model.Report) []string {
+	site.Name = siteLabel(site)
 	lines := []string{console.Safe(site.Name) + "  [" + strings.ToUpper(r.Overall) + "]", "Site: " + site.ID + "  Host: " + site.HostID, "Observed: " + console.At(r.ObservedAt) + "  Source: " + r.Vantage, "", "PRODUCTION PATH: " + chain(r), ""}
 	for _, c := range r.Checks {
 		lines = append(lines, fmt.Sprintf("[%-7s] %-16s %s", strings.ToUpper(string(c.State)), c.Layer, console.Safe(c.Summary)))
@@ -381,7 +424,12 @@ func HelpLines() []string {
 		"Esc: back from property or optional tool; clear site filter or cancel input",
 		"l from property: runtime logs; a: site readiness; b: recovery",
 		"x: dependency impact; / then enter a resource, e.g. caddy",
-		"w on Incidents: export the newest listed incident capsule",
+		"Ctrl+P: search every view and property without leaving the current workspace",
+		"2 on Sites: cycle name, health, CPU, memory and latency sorting",
+		"Up/Down on Readiness/Recovery/Incidents: choose a property or incident",
+		"1 on Readiness/Security: show or hide passing evidence",
+		"w on Incidents: export the selected incident capsule",
+		"E: Export for AI; Enter reviews, then Enter confirms; P chooses a folder",
 		"t in DEMO: simulate an application outage / recovery",
 		"q or Ctrl+C: quit and restore the terminal", "",
 		"CPU/RAM 1s via direct kernel reads; workload metrics/inventory/disk capacity 30s.",
@@ -400,7 +448,12 @@ func HelpLines() []string {
 		"Overview trends show the last 30 minutes on a fixed 0-100% scale.",
 		"Blank Overview columns mean no sample was recorded; they are not zero.",
 		"Paused collection or a disconnected SSH session can leave a gap in history.",
-		"Host charts retain actual timestamps and their longer history window.",
+		"Host charts use timestamp buckets for the last 30 minutes, with explicit units.",
+		"Network rates use counter differences; resets, reboots and long gaps stay unknown.",
+		"Interface traffic sums non-loopback devices; virtual traffic can be counted again.",
+		"Kernel pressure shows avg10 time with some tasks stalled; unsupported kernels show dashes.",
+		"History p95 and peak describe recorded samples, not continuously measured uptime.",
+		"Activity distributions count only fetched records (at most the latest 100 in 24h).",
 		"Property metrics cover associated workloads; shared backends are not unique usage.",
 		"Property CPU may exceed 100% when workloads use several cores.",
 		"Directory bars compare sizes to the largest row, not summed filesystem use.",

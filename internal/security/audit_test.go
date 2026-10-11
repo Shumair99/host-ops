@@ -12,7 +12,8 @@ import (
 
 func TestPostureNeverTreatsStaleMetadataAsCurrent(t *testing.T) {
 	site := config.Site{ID: "s", Runtime: config.Runtime{Type: "docker"}}
-	r := model.Report{ObservedAt: time.Now(), Runtime: model.Runtime{Status: "running", User: "1000", ReadOnly: true, MemoryLimit: 1024, Image: "web@sha256:abc"}}
+	r := model.Report{ObservedAt: time.Now(), Runtime: model.Runtime{PostureObserved: true, Status: "running", User: "1000", ReadOnly: true, MemoryLimit: 1024, Image: "web@sha256:abc"}}
+	r.Runtime.Processes = model.ProcessSnapshot{Observed: true, Complete: true, Items: []model.ProcessIdentity{{PID: 1, UID: 1000, Name: "app"}}}
 	for _, f := range Posture(site, r) {
 		if f.State != model.Pass {
 			t.Fatal(f)
@@ -33,6 +34,32 @@ func TestPostureNeverTreatsStaleMetadataAsCurrent(t *testing.T) {
 	findings := Posture(site, r)
 	if len(findings) != 1 || findings[0].State != model.Unknown {
 		t.Fatal(findings)
+	}
+}
+
+func TestAbsentHardeningMetadataCannotBecomeWarningsOrPasses(t *testing.T) {
+	site := config.Site{ID: "site", Runtime: config.Runtime{Type: "docker"}}
+	findings := Posture(site, model.Report{ObservedAt: time.Now(), Runtime: model.Runtime{Status: "running"}})
+	if len(findings) != 1 || findings[0].State != model.Unknown {
+		t.Fatal("unobserved fields became root/limit warnings or non-privileged passes", findings)
+	}
+}
+
+func TestSharedContainerChecksAndPortBindingsAreCountedOnce(t *testing.T) {
+	c := config.Config{Host: config.Host{ID: "h", CaddyContainer: "proxy"}, Sites: []config.Site{
+		{ID: "www", Name: "Friendly name", Proxy: config.Proxy{Domain: "www.example.com"}, Runtime: config.Runtime{Type: "docker", Container: "owned"}},
+		{ID: "base", Name: "example.com", Proxy: config.Proxy{Domain: "example.com"}, Runtime: config.Runtime{Type: "docker", Container: "owned"}},
+	}}
+	metadata := model.Runtime{PostureObserved: true, Status: "running", User: "1000", ReadOnly: true, MemoryLimit: 1024, Image: "app:v1", Ports: map[string][]model.Port{"80/tcp": {{HostIP: "127.0.0.1", HostPort: "8080"}}}}
+	reports := []model.Report{{SiteID: "base", ObservedAt: time.Now(), Runtime: metadata}, {SiteID: "www", ObservedAt: time.Now(), Runtime: metadata}}
+	r := Inspect(context.Background(), c, reports, &inventoryRunner{})
+	if len(r.Findings) != 5 || len(r.Exposures) != 1 {
+		t.Fatal("shared backend generated duplicate posture/exposure findings", r)
+	}
+	for _, f := range r.Findings {
+		if f.SiteID != "base" || f.Container != "owned" || len(f.SiteIDs) != 2 || f.SiteIDs[0] != "base" || f.SiteIDs[1] != "www" {
+			t.Fatal("custom label or shared endpoint scope was lost", f)
+		}
 	}
 }
 

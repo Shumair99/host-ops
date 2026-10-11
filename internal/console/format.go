@@ -241,8 +241,18 @@ func Format(kind string, value any) []string {
 			}
 			return fmt.Sprintf("%.1f%%", *n*100)
 		}
-		add("Host capacity used: CPU %s | RAM %s | weighted %s", usagePercent(v.HostCPUUsage), usagePercent(v.HostMemoryUsage), usagePercent(v.CapacityUsage))
-		add("Measured site use: %s (%d/%d workloads)", Money(v.SiteCost, v.Currency), v.MeasuredSites, len(v.Sites))
+		add("Host capacity used: CPU %s | RAM %s | DISK %s | weighted %s", usagePercent(v.HostCPUUsage), usagePercent(v.HostMemoryUsage), usagePercent(v.HostStorageUsage), usagePercent(v.CapacityUsage))
+		if v.StorageTotalBytes != nil && v.StorageUsedBytes != nil {
+			add("Root disk: %s / %s | snapshot %s", Bytes(float64(*v.StorageUsedBytes)), Bytes(float64(*v.StorageTotalBytes)), At(v.StorageObservedAt))
+		}
+		usageMoney := func(n *float64, partial bool) string {
+			label := Money(n, v.Currency)
+			if n != nil && partial {
+				return ">= " + label
+			}
+			return label
+		}
+		add("Measured site use: %s (%d/%d workloads)", usageMoney(v.SiteCost, v.SiteCostPartial), v.MeasuredSites, len(v.Sites))
 		if v.OtherCost != nil {
 			add("Shared / unmeasured usage: %s", Money(v.OtherCost, v.Currency))
 		} else if v.UnallocatedCost != nil {
@@ -263,11 +273,20 @@ func Format(kind string, value any) []string {
 		}
 		for _, s := range v.Sites {
 			if fees {
-				add("%-20s %-15s %-15s %s", s.Name, Money(s.Cost, v.Currency), Money(s.Revenue, v.Currency), Money(s.Margin, v.Currency))
+				add("%-20s %-15s %-15s %s", s.Name, usageMoney(s.Cost, s.UsagePartial), Money(s.Revenue, v.Currency), Money(s.Margin, v.Currency))
 			} else {
-				add("%-20s %s", s.Name, Money(s.Cost, v.Currency))
+				add("%-20s %s", s.Name, usageMoney(s.Cost, s.UsagePartial))
 			}
-			add("  Host capacity: CPU %s | RAM %s | weighted %s", usagePercent(s.CPUshare), usagePercent(s.MemoryShare), usagePercent(s.CapacityUsage))
+			add("  Host capacity: CPU %s | RAM %s | DISK %s | weighted %s", usagePercent(s.CPUshare), usagePercent(s.MemoryShare), usagePercent(s.StorageShare), usagePercent(s.CapacityUsage))
+			if s.StorageBytes != nil && v.StorageTotalBytes != nil {
+				add("  Disk footprint: %s / %s", Bytes(float64(*s.StorageBytes)), Bytes(float64(*v.StorageTotalBytes)))
+			}
+			if s.UsagePartial {
+				add("  PARTIAL: estimated usage cost is a lower bound; missing storage remains unassigned.")
+			}
+			if s.StorageNote != "" {
+				add("  %s", s.StorageNote)
+			}
 			if len(s.SiteIDs) > 1 {
 				add("  Shared workload: %d addresses, counted once.", len(s.SiteIDs))
 			}
@@ -280,7 +299,7 @@ func Format(kind string, value any) []string {
 		}
 		add("")
 		add("%s", v.Formula)
-		add("Usage weights: memory %.2f CPU %.2f", v.Weights.Memory, v.Weights.CPU)
+		add("Usage weights: memory %.2f CPU %.2f storage %.2f", v.Weights.Memory, v.Weights.CPU, v.Weights.Storage)
 		for _, n := range v.Notes {
 			add("%s", n)
 		}

@@ -289,9 +289,39 @@ func inspectDisk(parent context.Context, runner platform.Runner, h config.Host, 
 		}
 	}
 	r.Sites = siteStorage(sites, inventory, bindings, r.Directories, writable)
+	if len(writable) > 0 {
+		// Writable layers belong to the daemon's actual storage filesystem;
+		// never assume Docker's data directory is on the host's root disk.
+		if data, err = read(5, "docker", "info", "--format", "{{json .DockerRootDir}}"); err == nil {
+			var root string
+			if json.Unmarshal(data, &root) == nil && strings.HasPrefix(root, "/") {
+				mount := StorageFilesystem(root, r.Filesystems)
+				for i := range r.Sites {
+					if r.Sites[i].WritableBytes != nil {
+						r.Sites[i].WritableFilesystem = mount
+					}
+				}
+			}
+		}
+	}
 	r.CompletedAt = time.Now().UTC()
 	r.DurationSeconds = time.Since(start).Seconds()
 	return r
+}
+
+// StorageFilesystem uses the longest observed mount, including non-physical
+// filesystems, so a tmpfs/bind/secondary mount cannot be priced as root storage.
+func StorageFilesystem(p string, filesystems []Filesystem) string {
+	if !strings.HasPrefix(p, "/") {
+		return ""
+	}
+	best := ""
+	for _, fs := range filesystems {
+		if within(path.Clean(p), fs.Mount) && len(fs.Mount) > len(best) {
+			best = fs.Mount
+		}
+	}
+	return best
 }
 
 func siteStorage(sites []config.Site, inventory discovery.Registry, bindings map[string][]string, directories []DiskEntry, writable map[string]int64) []SiteStorage {

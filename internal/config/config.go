@@ -65,9 +65,10 @@ func (h Host) BillingEnabled() bool {
 }
 
 type CostWeights struct {
-	Equal  float64 `json:"equal"`
-	Memory float64 `json:"memory"`
-	CPU    float64 `json:"cpu"`
+	Equal   float64 `json:"equal"`
+	Memory  float64 `json:"memory"`
+	CPU     float64 `json:"cpu"`
+	Storage float64 `json:"storage"`
 }
 
 type Site struct {
@@ -200,8 +201,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("backup cost cannot be negative")
 	}
 	w := c.Host.CostWeights
-	sum := w.Equal + w.Memory + w.CPU
-	if w.Equal < 0 || w.Memory < 0 || w.CPU < 0 || sum != 0 && math.Abs(sum-1) > 0.000001 {
+	sum := w.Equal + w.Memory + w.CPU + w.Storage
+	if w.Equal < 0 || w.Memory < 0 || w.CPU < 0 || w.Storage < 0 || sum != 0 && math.Abs(sum-1) > 0.000001 {
 		return fmt.Errorf("cost weights must be non-negative and total 1")
 	}
 	if c.Host.Currency != "" && !regexp.MustCompile(`^[A-Z]{3}$`).MatchString(c.Host.Currency) {

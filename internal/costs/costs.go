@@ -24,6 +24,10 @@ type Allocation struct {
 	Samples        int      `json:"samples"`
 	CPUshare       *float64 `json:"cpu_share"` // Fraction of total host CPU capacity, not of other sites' usage.
 	MemoryShare    *float64 `json:"memory_share"`
+	StorageShare   *float64 `json:"storage_share"`
+	StorageBytes   *int64   `json:"storage_bytes,omitempty"`
+	UsagePartial   bool     `json:"usage_partial"`
+	StorageNote    string   `json:"storage_note,omitempty"`
 	CapacityUsage  *float64 `json:"capacity_usage"`
 	Cost           *float64 `json:"estimated_monthly_cost"`
 	Revenue        *float64 `json:"monthly_revenue"`
@@ -31,38 +35,47 @@ type Allocation struct {
 	NoisyNeighbour bool     `json:"noisy_neighbour"`
 }
 type Report struct {
-	Billing         *billing.Report    `json:"billing,omitempty"`
-	HostID          string             `json:"host_id"`
-	ObservedAt      time.Time          `json:"observed_at"`
-	WindowStart     time.Time          `json:"window_start"`
-	WindowEnd       time.Time          `json:"window_end"`
-	HostSamples     int                `json:"host_samples"`
-	Currency        string             `json:"currency"`
-	TotalCost       *float64           `json:"total_monthly_cost"`
-	SiteCost        *float64           `json:"estimated_site_monthly_cost"`
-	UnallocatedCost *float64           `json:"unallocated_monthly_cost"`
-	UnusedCost      *float64           `json:"estimated_unused_monthly_cost"`
-	OtherCost       *float64           `json:"estimated_other_monthly_cost"`
-	HostCPUUsage    *float64           `json:"host_cpu_usage"`
-	HostMemoryUsage *float64           `json:"host_memory_usage"`
-	CapacityUsage   *float64           `json:"capacity_usage"`
-	MeasuredSites   int                `json:"measured_sites"`
-	Weights         config.CostWeights `json:"weights"`
-	Formula         string             `json:"formula"`
-	Sites           []Allocation       `json:"sites"`
-	Notes           []string           `json:"notes"`
+	Billing           *billing.Report    `json:"billing,omitempty"`
+	HostID            string             `json:"host_id"`
+	ObservedAt        time.Time          `json:"observed_at"`
+	WindowStart       time.Time          `json:"window_start"`
+	WindowEnd         time.Time          `json:"window_end"`
+	HostSamples       int                `json:"host_samples"`
+	Currency          string             `json:"currency"`
+	TotalCost         *float64           `json:"total_monthly_cost"`
+	SiteCost          *float64           `json:"estimated_site_monthly_cost"`
+	UnallocatedCost   *float64           `json:"unallocated_monthly_cost"`
+	UnusedCost        *float64           `json:"estimated_unused_monthly_cost"`
+	OtherCost         *float64           `json:"estimated_other_monthly_cost"`
+	HostCPUUsage      *float64           `json:"host_cpu_usage"`
+	HostMemoryUsage   *float64           `json:"host_memory_usage"`
+	HostStorageUsage  *float64           `json:"host_storage_usage"`
+	StorageTotalBytes *int64             `json:"storage_total_bytes,omitempty"`
+	StorageUsedBytes  *int64             `json:"storage_used_bytes,omitempty"`
+	StorageObservedAt time.Time          `json:"storage_observed_at,omitempty"`
+	SiteCostPartial   bool               `json:"site_cost_partial"`
+	CapacityUsage     *float64           `json:"capacity_usage"`
+	MeasuredSites     int                `json:"measured_sites"`
+	Weights           config.CostWeights `json:"weights"`
+	Formula           string             `json:"formula"`
+	Sites             []Allocation       `json:"sites"`
+	Notes             []string           `json:"notes"`
 }
 
 // Allocate requires measured host capacity as well as workload observations.
 // Missing denominators must never become equal shares of the monthly bill.
-func Allocate(c config.Config, samples map[string][]metrics.Sample, hostSamples []metrics.Sample) Report {
+func Allocate(c config.Config, samples map[string][]metrics.Sample, hostSamples []metrics.Sample, disk ...*metrics.DiskReport) Report {
 	var total *float64
 	if c.Host.Billing != nil && c.Host.Billing.MonthlyAmount != nil {
 		total = number(*c.Host.Billing.MonthlyAmount + c.Host.MonthlyBackupCost)
 	} else if c.Host.Billing == nil && c.Host.MonthlyCost+c.Host.MonthlyBackupCost > 0 {
 		total = number(c.Host.MonthlyCost + c.Host.MonthlyBackupCost)
 	}
-	return allocate(c, samples, hostSamples, total)
+	var report *metrics.DiskReport
+	if len(disk) > 0 {
+		report = disk[0]
+	}
+	return allocate(c, samples, hostSamples, total, report)
 }
 
 type allocationGroup struct {
@@ -200,11 +213,11 @@ func (a average) value() *float64 {
 	return number(a.sum / float64(a.count))
 }
 
-func allocate(c config.Config, samples map[string][]metrics.Sample, hostSamples []metrics.Sample, total *float64) Report {
+func allocate(c config.Config, samples map[string][]metrics.Sample, hostSamples []metrics.Sample, total *float64, disk *metrics.DiskReport) Report {
 	w := c.Host.CostWeights
 	legacyEqual := w.Equal
-	if w.Equal+w.Memory+w.CPU == 0 {
-		w = config.CostWeights{Memory: .5, CPU: .5}
+	if w.Equal+w.Memory+w.CPU+w.Storage == 0 {
+		w = config.CostWeights{Memory: 1.0 / 3, CPU: 1.0 / 3, Storage: 1.0 / 3}
 	} else {
 		// The old equal component no longer reserves part of the entire bill.
 		w.CPU += w.Equal / 2
@@ -212,15 +225,17 @@ func allocate(c config.Config, samples map[string][]metrics.Sample, hostSamples 
 		w.Equal = 0
 	}
 	r := Report{HostID: c.Host.ID, ObservedAt: time.Now().UTC(), Currency: c.Host.Currency, TotalCost: total, Weights: w,
-		Formula: "monthly budget * (cpu_weight * workload_CPU / total_host_CPU + memory_weight * workload_RAM / total_host_RAM)",
+		Formula: "monthly budget * (cpu_weight * workload_CPU / total_host_CPU + memory_weight * workload_RAM / total_host_RAM + storage_weight * measured_site_bytes / root_disk_capacity)",
 		Sites:   []Allocation{}, Notes: []string{
 			"Usage values capacity consumed; the hosting bill still covers the whole server. Unused capacity is not a billing discount.",
-			"CPU is measured across all host cores; memory uses host RAM, not the container's memory limit. Disk, traffic and backup usage are not measured in this estimate.",
+			"CPU is measured across all host cores; RAM uses host memory, not a container limit. Storage uses attributable directories and writable layers on the root filesystem. Shared images, caches, logs and unassigned bytes remain shared/unmeasured; traffic is excluded.",
 			"Recent matched observations are projected to a month, not a monthly usage history. Missing measurements remain unknown.",
 		}}
 	if legacyEqual > 0 {
 		r.Notes = append(r.Notes, "Legacy equal weight is split equally between CPU and RAM; no fixed part of the bill is distributed among sites.")
 	}
+	storage := newStorageEvidence(disk, c.Host.ID, r.ObservedAt)
+	storage.host(&r)
 	hosts := cleanSamples(hostSamples, c.Host.ID, r.ObservedAt)
 	if len(hosts) > 0 && model.Fresh(hosts[len(hosts)-1].ObservedAt, r.ObservedAt, model.DefaultMaxAge) {
 		r.WindowStart, r.WindowEnd = hosts[0].ObservedAt, hosts[len(hosts)-1].ObservedAt
@@ -238,11 +253,11 @@ func allocate(c config.Config, samples map[string][]metrics.Sample, hostSamples 
 		if fraction(latest.Values, "memory_used_bytes", latest.Values["memory_total_bytes"]) != nil {
 			r.HostMemoryUsage = memory.value()
 		}
-		r.CapacityUsage = weighted(r.HostCPUUsage, r.HostMemoryUsage, w)
 	} else {
 		hosts = nil
-		r.Notes = append(r.Notes, "Fresh host measurements unavailable; resource usage cannot be priced without measured server capacity.")
+		r.Notes = append(r.Notes, "Fresh host CPU/RAM measurements unavailable; those capacity components cannot be priced.")
 	}
+	r.CapacityUsage = combined(r.HostCPUUsage, r.HostMemoryUsage, r.HostStorageUsage, w)
 	if total == nil {
 		r.Notes = append(r.Notes, "Host cost is not configured; estimates and margins remain unknown.")
 	}
@@ -306,9 +321,19 @@ func allocate(c config.Config, samples map[string][]metrics.Sample, hostSamples 
 		if currentMemory != nil {
 			a.MemoryShare = memory.value()
 		}
+		storage.site(&a, g)
 		a.CapacityUsage = weighted(a.CPUshare, a.MemoryShare, w)
-		if total != nil && a.CapacityUsage != nil {
-			a.Cost = number(*total * *a.CapacityUsage)
+		if a.CapacityUsage != nil && w.Storage > 0 {
+			if a.StorageShare != nil {
+				*a.CapacityUsage += w.Storage * *a.StorageShare
+			}
+			a.UsagePartial = a.UsagePartial || a.StorageShare == nil
+		}
+		if w.Storage == 0 {
+			a.UsagePartial = false
+		}
+		if w.CPU+w.Memory == 0 && a.StorageShare == nil {
+			a.CapacityUsage = nil
 		}
 		if total != nil && *total == 0 {
 			a.Cost = number(0)
@@ -332,6 +357,24 @@ func allocate(c config.Config, samples map[string][]metrics.Sample, hostSamples 
 			memorySum += *s.MemoryShare
 		}
 	}
+	storageSum := 0.0
+	for _, a := range r.Sites {
+		if a.StorageShare != nil {
+			storageSum += *a.StorageShare
+		}
+	}
+	if r.HostStorageUsage != nil && storageSum > *r.HostStorageUsage+.000001 {
+		for i := range r.Sites {
+			r.Sites[i].StorageShare, r.Sites[i].StorageBytes = nil, nil
+			r.Sites[i].StorageNote = "Attributed storage totals exceed the used root disk; ownership requires inspection."
+			r.Sites[i].CapacityUsage = weighted(r.Sites[i].CPUshare, r.Sites[i].MemoryShare, w)
+			if w.CPU+w.Memory == 0 {
+				r.Sites[i].CapacityUsage = nil
+			}
+			r.Sites[i].UsagePartial = w.Storage > 0
+		}
+		r.Notes = append(r.Notes, "Attributed storage totals exceed root disk usage; storage is left unassigned rather than rescaled.")
+	}
 	if w.CPU > 0 && cpuSum > 1.000001 || w.Memory > 0 && memorySum > 1.000001 {
 		for i := range r.Sites {
 			r.Sites[i].Cost, r.Sites[i].CapacityUsage = nil, nil
@@ -341,18 +384,23 @@ func allocate(c config.Config, samples map[string][]metrics.Sample, hostSamples 
 	subtotal := 0.0
 	for i := range r.Sites {
 		s := &r.Sites[i]
+		if total != nil && s.CapacityUsage != nil {
+			s.Cost = number(*total * *s.CapacityUsage)
+		}
 		if total != nil && *total == 0 {
 			s.Cost = number(0)
+			s.UsagePartial = false // A known zero budget has an exact zero cost.
 		}
 		if s.CapacityUsage != nil {
 			r.MeasuredSites++
 		}
 		if s.Cost != nil {
 			subtotal += *s.Cost
-			if s.Revenue != nil {
+			if s.Revenue != nil && !s.UsagePartial {
 				s.Margin = number(*s.Revenue - *s.Cost)
 			}
 		}
+		r.SiteCostPartial = r.SiteCostPartial || s.UsagePartial
 	}
 	if total != nil {
 		if *total == 0 {
@@ -377,7 +425,7 @@ func allocate(c config.Config, samples map[string][]metrics.Sample, hostSamples 
 		}
 	}
 	if r.MeasuredSites < len(r.Sites) {
-		r.Notes = append(r.Notes, fmt.Sprintf("%d of %d workloads have enough matched CPU/RAM evidence for a usage estimate. Shared and unmeasured usage is not redistributed to measured sites.", r.MeasuredSites, len(r.Sites)))
+		r.Notes = append(r.Notes, fmt.Sprintf("%d of %d workloads have matched compute evidence for an estimate. Missing storage produces a labelled partial estimate; unassigned usage is not redistributed.", r.MeasuredSites, len(r.Sites)))
 	}
 	return r
 }
@@ -420,7 +468,15 @@ func Assess(ctx context.Context, c config.Config, store *storage.Store) (Report,
 			return Report{}, err
 		}
 	}
-	r := allocate(c, samples, hostSamples, observation.MonthlyEstimate)
+	var disk *metrics.DiskReport
+	data, err := store.State(ctx, c.Host.ID, "", "disk_inspection")
+	if err != nil {
+		return Report{}, err
+	}
+	if len(data) > 0 && json.Unmarshal(data, &disk) != nil {
+		return Report{}, fmt.Errorf("decode disk allocation evidence")
+	}
+	r := allocate(c, samples, hostSamples, observation.MonthlyEstimate, disk)
 	r.Billing = &observation
 	r.Notes = append(r.Notes, notes...)
 	r.Notes = append(r.Notes, observation.Notes...)

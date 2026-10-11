@@ -86,19 +86,25 @@ func (m dashboard) detailLines(w int) []string {
 			}
 			return fmt.Sprintf("%.1f%%", *n*100)
 		}
-		rows = []string{"CPU  " + usagePercent(v.HostCPUUsage) + "   RAM  " + usagePercent(v.HostMemoryUsage)}
+		rows = []string{"CPU  " + usagePercent(v.HostCPUUsage) + "   RAM  " + usagePercent(v.HostMemoryUsage) + "   Disk  " + usagePercent(v.HostStorageUsage)}
+		if v.StorageTotalBytes != nil && v.StorageUsedBytes != nil {
+			rows = append(rows, "Root disk  "+console.Bytes(float64(*v.StorageUsedBytes))+" / "+console.Bytes(float64(*v.StorageTotalBytes))+" · "+ageLabel(v.StorageObservedAt))
+			if v.HostStorageUsage != nil && *v.HostStorageUsage >= .85 {
+				rows = append(rows, t.paint("Disk capacity requires attention", amber))
+			}
+		}
 		if v.CapacityUsage != nil {
 			n := *v.CapacityUsage * 100
 			rows = append(rows, t.meter(&n, max(1, w-24), cyan)+" "+usagePercent(v.CapacityUsage)+" used")
 		}
-		rows = append(rows, fmt.Sprintf("Measured site use     %s  (%d/%d workloads)", console.Money(v.SiteCost, v.Currency), v.MeasuredSites, len(v.Sites)))
+		rows = append(rows, fmt.Sprintf("Measured site use     %s  (%d/%d workloads)", usageMoney(v.SiteCost, v.Currency, v.SiteCostPartial), v.MeasuredSites, len(v.Sites)))
 		if v.OtherCost != nil {
 			rows = append(rows, "Shared / unmeasured   "+console.Money(v.OtherCost, v.Currency))
 		} else if v.UnallocatedCost != nil {
 			rows = append(rows, "Unassigned budget     "+console.Money(v.UnallocatedCost, v.Currency), t.paint("Includes shared usage and spare capacity.", muted))
 		}
 		rows = append(rows, "Unused capacity       "+console.Money(v.UnusedCost, v.Currency))
-		rows = append(rows, t.paint(fmt.Sprintf("Usage weighting: CPU %.0f%% / RAM %.0f%%", v.Weights.CPU*100, v.Weights.Memory*100), muted))
+		rows = append(rows, t.paint(fmt.Sprintf("Usage weighting: CPU %.0f%% / RAM %.0f%% / Disk %.0f%%", v.Weights.CPU*100, v.Weights.Memory*100, v.Weights.Storage*100), muted))
 		if v.HostSamples > 0 {
 			rows = append(rows, t.paint(fmt.Sprintf("Recent %s · %d host samples", v.WindowEnd.Sub(v.WindowStart).Round(time.Second), v.HostSamples), muted))
 		}
@@ -117,11 +123,22 @@ func (m dashboard) detailLines(w int) []string {
 		}
 		rows = []string{t.paint(heading, muted)}
 		for _, s := range v.Sites {
-			line := pad(clean(m.siteOrderKey(s.SiteID, s.Name)), nameWidth) + " " + t.paint(pad(console.Money(s.Cost, v.Currency), 12), cyan)
+			line := pad(clean(m.siteOrderKey(s.SiteID, s.Name)), nameWidth) + " " + t.paint(pad(usageMoney(s.Cost, v.Currency, s.UsagePartial), 12), cyan)
 			if fees {
 				line += " " + pad(console.Money(s.Revenue, v.Currency), 11) + " " + console.Money(s.Margin, v.Currency)
 			}
 			rows = append(rows, line)
+			storage := "Disk  " + usagePercent(s.StorageShare) + " of root capacity"
+			if s.StorageBytes != nil && v.StorageTotalBytes != nil {
+				storage = "Disk  " + console.Bytes(float64(*s.StorageBytes)) + " / " + console.Bytes(float64(*v.StorageTotalBytes)) + "  (" + usagePercent(s.StorageShare) + ")"
+			}
+			rows = append(rows, wrap([]string{t.paint(storage, muted)}, w-4)...)
+			if s.UsagePartial {
+				rows = append(rows, t.paint("Partial estimate · some storage is unassigned", amber))
+			}
+			if s.StorageNote != "" && v.StorageTotalBytes != nil {
+				rows = append(rows, wrap([]string{t.paint(clean(s.StorageNote), muted)}, w-4)...)
+			}
 			if s.CapacityUsage != nil {
 				n := *s.CapacityUsage * 100
 				rows = append(rows, t.meter(&n, max(1, w-33), cyan)+" "+usagePercent(s.CapacityUsage)+" of host capacity")
@@ -143,11 +160,11 @@ func (m dashboard) detailLines(w int) []string {
 		for _, note := range v.Notes {
 			if strings.HasPrefix(note, "Hosting fees need") {
 				notes = append(notes, "Fees hidden / currency mismatch")
-			} else if strings.HasPrefix(note, "Fresh host") || strings.HasPrefix(note, "Workload totals exceed") || strings.HasPrefix(note, "Site and host observations") || strings.HasPrefix(note, "Legacy equal weight") {
+			} else if strings.HasPrefix(note, "Fresh host") || strings.HasPrefix(note, "Workload totals exceed") || strings.HasPrefix(note, "Site and host observations") || strings.HasPrefix(note, "Legacy equal weight") || strings.HasPrefix(note, "Storage accounting") || strings.HasPrefix(note, "Attributed storage") {
 				notes = append(notes, note)
 			}
 		}
-		notes = append(notes, "Recent CPU/RAM usage projected to a month; disk, traffic and backup usage excluded.")
+		notes = append(notes, "CPU/RAM use and the retained root-disk footprint value monthly capacity. Shared storage remains unassigned; traffic is excluded.")
 		if len(notes) > 0 {
 			out = append(out, panel("Billing evidence", m.decorate(notes))...)
 		}

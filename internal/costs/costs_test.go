@@ -32,7 +32,7 @@ func TestAllocationPricesActualCapacityAndKeepsUnusedBudget(t *testing.T) {
 
 func lowUsageFixture() (config.Config, map[string][]metrics.Sample, []metrics.Sample) {
 	now := time.Now().UTC()
-	c := config.Config{Host: config.Host{ID: "h", MonthlyCost: 100, Currency: "GBP"}, Sites: []config.Site{{ID: "a", HostID: "h", Runtime: config.Runtime{Type: "docker", Container: "a"}}}}
+	c := config.Config{Host: config.Host{ID: "h", MonthlyCost: 100, Currency: "GBP", CostWeights: config.CostWeights{CPU: .5, Memory: .5}}, Sites: []config.Site{{ID: "a", HostID: "h", Runtime: config.Runtime{Type: "docker", Container: "a"}}}}
 	samples := map[string][]metrics.Sample{"a": {{HostID: "h", ObservedAt: now, Values: map[string]float64{"cpu_percent": 40, "memory_used_bytes": 200, "memory_percent": 99}}}}
 	hosts := []metrics.Sample{{HostID: "h", ObservedAt: now, Values: map[string]float64{"cpu_count": 4, "cpu_percent": 20, "memory_total_bytes": 1000, "memory_used_bytes": 300}}}
 	return c, samples, hosts

@@ -26,14 +26,15 @@ type Filesystem struct {
 	InodesUsed     int64  `json:"inodes_used"`
 }
 type SiteStorage struct {
-	SiteID          string   `json:"site_id"`
-	Name            string   `json:"name"`
-	Paths           []string `json:"paths"`
-	DirectoryBytes  *int64   `json:"directory_bytes,omitempty"`
-	WritableBytes   *int64   `json:"writable_bytes,omitempty"`
-	WritablePartial bool     `json:"writable_partial,omitempty"`
-	Shared          bool     `json:"shared"`
-	Partial         bool     `json:"partial"`
+	SiteID             string   `json:"site_id"`
+	Name               string   `json:"name"`
+	Paths              []string `json:"paths"`
+	DirectoryBytes     *int64   `json:"directory_bytes,omitempty"`
+	WritableBytes      *int64   `json:"writable_bytes,omitempty"`
+	WritableFilesystem string   `json:"writable_filesystem,omitempty"`
+	WritablePartial    bool     `json:"writable_partial,omitempty"`
+	Shared             bool     `json:"shared"`
+	Partial            bool     `json:"partial"`
 }
 type DiskReport struct {
 	HostID          string              `json:"host_id"`

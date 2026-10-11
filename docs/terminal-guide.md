@@ -23,12 +23,12 @@ The demo header says `DEMO / FICTIONAL DATA`. Its CPU, disk, prices, sites, tren
 ## A five-minute walkthrough
 
 1. On Overview, compare the host trend canvas, six-property health matrix, public response times and workload memory rankings. The fictional disk is 88% used to demonstrate a capacity warning. Host plots share a 0–100% scale; blank time columns mean missing samples.
-2. Press `s`. Use Down to select Example Bravo and Enter to open its property view. Scroll to see individual checks, doctor evidence and the Site Passport. Press `l` for fictional logs, then Esc to return to Sites.
-3. Press `t`. The demo stops Bravo's fictional application and supplies the three confirmed failure observations needed to open an incident. DNS, TLS and proxy routing still pass; runtime, local HTTP and public HTTP fail. This is a scenario simulation, not a container stop.
+2. Press `s`. Use Down to select Example Site B and Enter to open its property view. Scroll to see individual checks, doctor evidence and the Site Passport. Press `l` for fictional logs, then Esc to return to Sites.
+3. Press `t`. The demo stops Example Site B's fictional application and supplies the three confirmed failure observations needed to open an incident. DNS, TLS and proxy routing still pass; runtime, local HTTP and public HTTP fail. This is a scenario simulation, not a container stop.
 4. Press `n`. Choose an incident with Up/Down and read its status, symptoms and investigation. Press `w` to export the selected redacted JSON capsule under `local/capsules/`. Review that file before sharing.
-5. Press `t` again. The demo supplies two recovery observations. The same incident becomes `[RESOLVED]`; its original outage symptoms remain as historical evidence. Press `o` to see Bravo healthy again.
+5. Press `t` again. The demo supplies two recovery observations. The same incident becomes `[RESOLVED]`; its original outage symptoms remain as historical evidence. Press `o` to see Example Site B healthy again.
 6. Press `d` for illustrative directory, property and Docker storage accounting. Right focuses the tree; Up/Down selects a directory, Enter opens it and Backspace returns to its parent. Parent/child totals overlap. `>=` means an incomplete lower bound. This view never cleans anything up.
-7. Try `h` for network, load, memory and pressure instruments. Try `r` for readiness, `b` for recovery, `p` for capacity, or `x` for a dependency tree. Up/Down selects the property on readiness/recovery; `1` expands passing readiness/security evidence. On Impact, `/` selects a configured resource such as `caddy` or `alpha`.
+7. Try `h` for network, load, memory and pressure instruments. Try `r` for readiness, `b` for recovery, `p` for capacity, or `x` for a dependency tree. Up/Down selects the property on readiness/recovery; `1` expands passing readiness/security evidence. On Impact, `/` selects a configured resource such as `caddy` or `example-site-a`.
 8. Press `q` to return to your shell.
 
 ## Read the measurements and states

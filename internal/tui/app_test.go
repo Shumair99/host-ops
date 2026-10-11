@@ -119,16 +119,16 @@ func TestSiteSelectionDrillDownAndFilter(t *testing.T) {
 	m, _ = press(m, "down")
 	m, cmd = press(m, "enter")
 	m = finish(m, cmd)
-	if m.page != "site" || m.siteID != "bravo" || !strings.Contains(strings.Join(m.lines, "\n"), "SITE PASSPORT") {
+	if m.page != "site" || m.siteID != "example-site-b" || !strings.Contains(strings.Join(m.lines, "\n"), "SITE PASSPORT") {
 		t.Fatal(m.page, m.siteID, m.lines)
 	}
 	m, cmd = press(m, "esc")
 	m = finish(m, cmd)
 	m, _ = press(m, "/")
-	m.input = "alpha"
+	m.input = "example-site-a"
 	m, cmd = press(m, "enter")
 	m = finish(m, cmd)
-	if len(m.filteredSites()) != 1 || m.filteredSites()[0].ID != "alpha" {
+	if len(m.filteredSites()) != 1 || m.filteredSites()[0].ID != "example-site-a" {
 		t.Fatal(m.filteredSites())
 	}
 }
@@ -170,10 +170,10 @@ func TestMenuPreviewsVerticallyAndRightOnlyChangesFocus(t *testing.T) {
 
 func TestBackgroundSiteRefreshKeepsEvidenceVisibleAndDoesNotOverlap(t *testing.T) {
 	m := testDashboard(t)
-	m.siteID = "alpha"
+	m.siteID = "example-site-a"
 	m.page = "site"
 	var err error
-	m.lines, err = m.source.Page(m.ctx, "site", "alpha", m.target, m.snapshot)
+	m.lines, err = m.source.Page(m.ctx, "site", "example-site-a", m.target, m.snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,9 +242,9 @@ func TestToolsKeepsOptionalViewsOutOfMainMenu(t *testing.T) {
 
 func TestFailedBackgroundReadPreservesEvidenceAndRecovers(t *testing.T) {
 	m := testDashboard(t)
-	m.siteID, m.page = "alpha", "site"
+	m.siteID, m.page = "example-site-a", "site"
 	var err error
-	m.lines, err = m.source.Page(m.ctx, "site", "alpha", m.target, m.snapshot)
+	m.lines, err = m.source.Page(m.ctx, "site", "example-site-a", m.target, m.snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestFleetRowsStayTogetherAndHeadersCannotInjectRows(t *testing.T) {
 		for _, page := range []string{"sites", "overview"} {
 			m.page = page
 			for _, line := range m.liveLines() {
-				if strings.Contains(line, "Example alpha") || strings.Contains(line, "Example bravo") {
+				if strings.Contains(line, "Example Site A") || strings.Contains(line, "Example Site B") {
 					if ansi.StringWidth(line) > m.bodyWidth() {
 						t.Fatalf("fleet row wraps at width %d: %q", width, line)
 					}

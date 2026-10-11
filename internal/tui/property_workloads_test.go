@@ -13,8 +13,8 @@ import (
 
 func relatedDomainDashboard(m dashboard) dashboard {
 	child := m.snapshot.Sites[0]
-	child.ID, child.Name = "alpha-analytics", "Example analytics"
-	child.Proxy.Domain, child.Runtime.Container = "analytics.alpha.example.invalid", "demo-analytics"
+	child.ID, child.Name = "example-site-a-analytics", "Example analytics"
+	child.Proxy.Domain, child.Runtime.Container = "analytics.site-a.example.invalid", "demo-analytics"
 	child.Proxy.Upstream = child.Runtime.Container + ":80"
 	child.Health.PublicURL = "https://" + child.Proxy.Domain + "/healthz"
 	m.snapshot.Sites = append(m.snapshot.Sites, child)
@@ -52,19 +52,19 @@ func TestSubdomainPropertyKeepsIndependentHealthResourcesAndNavigation(t *testin
 			m.snapshot.Reports[index].Checks[i].StatusCode = 503
 		}
 	}
-	if len(m.sites()) != 6 || m.report("alpha").Overall != "critical" || domainReport(m.snapshot.Sites[0], reportsByID(m.snapshot.Reports)).Overall != "healthy" {
+	if len(m.sites()) != 6 || m.report("example-site-a").Overall != "critical" || domainReport(m.snapshot.Sites[0], reportsByID(m.snapshot.Reports)).Overall != "healthy" {
 		t.Fatal("grouping duplicated a property or changed independent health")
 	}
 	matrix := ansi.Strip(strings.Join(m.healthMatrix(122, 8), "\n"))
-	if strings.Contains(matrix, child.Proxy.Domain) || !strings.Contains(matrix, "alpha.example.invalid +1") || !strings.Contains(matrix, "CRITICAL") {
+	if strings.Contains(matrix, child.Proxy.Domain) || !strings.Contains(matrix, "site-a.example.invalid +1") || !strings.Contains(matrix, "CRITICAL") {
 		t.Fatal("subdomain escaped the property row or hid a failure", matrix)
 	}
 	ranking := ansi.Strip(strings.Join(m.pressureRanking(122, 20, "memory_used_bytes"), "\n"))
 	if !strings.Contains(ranking, child.Proxy.Domain) || !strings.Contains(ranking, "73.4 MiB") || !strings.Contains(ranking, "41.7 MiB") {
 		t.Fatal("parent grouping combined or omitted separate workloads", ranking)
 	}
-	m.filter = "analytics.alpha"
-	if sites := m.filteredSites(); len(sites) != 1 || sites[0].ID != "alpha" {
+	m.filter = "analytics.site-a"
+	if sites := m.filteredSites(); len(sites) != 1 || sites[0].ID != "example-site-a" {
 		t.Fatal("filter no longer locates the child's parent", sites)
 	}
 	m.inputKind, m.input = "command", child.Proxy.Domain
@@ -85,7 +85,7 @@ func TestSubdomainPropertyKeepsIndependentHealthResourcesAndNavigation(t *testin
 		t.Fatal("direct subdomain inspection borrowed the parent runtime or measurements", frame)
 	}
 	m.filter, m.siteSort = "", 2
-	if sites := m.filteredSites(); sites[0].ID != "alpha" {
+	if sites := m.filteredSites(); sites[0].ID != "example-site-a" {
 		t.Fatal("resource sort omitted the busy subdomain", sites)
 	}
 }
@@ -110,25 +110,25 @@ func TestPropertyGroupingRespectsSuffixBoundariesAndObservedParents(t *testing.T
 func TestResourceRowsDeduplicateOnlyTheSameWorkloadAndPreferItsNewestSample(t *testing.T) {
 	m := relatedDomainDashboard(testDashboard(t))
 	alias := m.snapshot.Sites[0]
-	alias.ID, alias.Proxy.Domain = "alpha-www", "www.alpha.example.invalid"
+	alias.ID, alias.Proxy.Domain = "example-site-a-www", "www.site-a.example.invalid"
 	m.snapshot.Sites = append(m.snapshot.Sites, alias)
 	m.snapshot.Workloads[alias.ID] = metrics.Sample{ObservedAt: time.Now().Add(time.Second), Values: map[string]float64{"cpu_percent": 19, "memory_used_bytes": 43.7e6}}
-	readings := m.workloadReadings(groupFor(m.rawSites(), "alpha").domains())
-	if len(readings) != 2 || readings[0].Sample.Values["cpu_percent"] != 19 || readings[0].Label != "alpha.example.invalid" || readings[1].Sample.Values["cpu_percent"] != 31 {
+	readings := m.workloadReadings(groupFor(m.rawSites(), "example-site-a").domains())
+	if len(readings) != 2 || readings[0].Sample.Values["cpu_percent"] != 19 || readings[0].Label != "site-a.example.invalid" || readings[1].Sample.Values["cpu_percent"] != 31 {
 		t.Fatal("alias duplicated a workload or analytics lost its independent sample", readings)
 	}
 }
 
 func TestInspectingSubdomainCannotReuseAnotherDomainsHistory(t *testing.T) {
 	m := relatedDomainDashboard(testDashboard(t))
-	if _, err := m.source.Evidence(m.ctx, "site", "alpha", "host", &m.snapshot); err != nil || len(m.snapshot.SiteHistory) == 0 {
+	if _, err := m.source.Evidence(m.ctx, "site", "example-site-a", "host", &m.snapshot); err != nil || len(m.snapshot.SiteHistory) == 0 {
 		t.Fatal("primary-domain history unavailable", err)
 	}
 	child := m.snapshot.Sites[len(m.snapshot.Sites)-1]
 	if summary := strings.Join(m.inspectorSummary(child, 122), "\n"); strings.Contains(summary, "Workload CPU") {
 		t.Fatal("inspector reused old-domain history while the new view loads", summary)
 	}
-	if _, err := m.source.Evidence(m.ctx, "site", "alpha-analytics", "host", &m.snapshot); err != nil || len(m.snapshot.SiteHistory) != 0 {
+	if _, err := m.source.Evidence(m.ctx, "site", "example-site-a-analytics", "host", &m.snapshot); err != nil || len(m.snapshot.SiteHistory) != 0 {
 		t.Fatal("unobserved subdomain inherited primary-domain history", err, m.snapshot.SiteHistory)
 	}
 }

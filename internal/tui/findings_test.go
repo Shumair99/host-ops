@@ -14,7 +14,7 @@ import (
 
 func fictionalDNSFailure(m dashboard) dashboard {
 	for i, r := range m.snapshot.Reports {
-		if r.SiteID != "alpha" {
+		if r.SiteID != "example-site-a" {
 			continue
 		}
 		for j := range r.Checks {
@@ -40,7 +40,7 @@ func TestFindingsAreProminentWithoutClaimingDomainOwnership(t *testing.T) {
 	for _, page := range []string{"overview", "sites", "issues", "site"} {
 		m.page, m.siteID = page, ""
 		if page == "site" {
-			m.siteID = "alpha"
+			m.siteID = "example-site-a"
 		}
 		text := ansi.Strip(m.frame())
 		if !strings.Contains(text, "Observed") || !strings.Contains(text, "Registry expiration") {
@@ -60,7 +60,7 @@ func TestAliasFindingsDoNotBorrowPrimaryDomainLocalEvidence(t *testing.T) {
 	m := testDashboard(t)
 	base := m.snapshot.Sites[0]
 	alias := base
-	alias.ID, alias.Proxy.Domain = "alpha-www", "www.alpha.example.invalid"
+	alias.ID, alias.Proxy.Domain = "example-site-a-www", "www.site-a.example.invalid"
 	m.snapshot.Sites = append(m.snapshot.Sites, alias)
 	m.source.Config.Sites = append(m.source.Config.Sites, alias)
 	m.snapshot.Reports = append(m.snapshot.Reports, model.Report{SiteID: alias.ID, Overall: "critical", Checks: []model.Check{{Layer: "local_http", State: model.Skip}, {Layer: "public_http", State: model.Fail, StatusCode: 502}}})
@@ -85,7 +85,7 @@ func TestOverviewPinsCurrentFindingsWithoutBreakingMatrixOrRetainingResolvedNoti
 	if !strings.Contains(feed, "Registry expiration date has elapsed") || !strings.Contains(feed, "No recorded changes") {
 		t.Fatal("current notices depend on recent activity", feed)
 	}
-	m.snapshot.Events = []storage.Record{{Kind: "event", SiteID: "alpha", ObservedAt: time.Now(), Data: []byte(`{"summary":"An older incident"}`)}}
+	m.snapshot.Events = []storage.Record{{Kind: "event", SiteID: "example-site-a", ObservedAt: time.Now(), Data: []byte(`{"summary":"An older incident"}`)}}
 	feed = ansi.Strip(strings.Join(m.operationsFeed(122, 4, 3), "\n"))
 	if strings.Index(feed, "Registry expiration") > strings.Index(feed, "An older incident") {
 		t.Fatal("recent activity displaced an active notice", feed)
@@ -104,6 +104,9 @@ func TestOverviewPinsCurrentFindingsWithoutBreakingMatrixOrRetainingResolvedNoti
 
 func TestIssuesFindingArrowBelongsToDomainAndWrappedLinesAlign(t *testing.T) {
 	m := fictionalDNSFailure(testDashboard(t))
+	// Keep this fixture short so the narrow case checks arrow alignment rather
+	// than clipping of a long domain and its status.
+	m.snapshot.Sites[0].Proxy.Domain = "a.example.invalid"
 	for _, width := range []int{38, 122} {
 		lines := strings.Split(ansi.Strip(strings.Join(m.findingDesk(width), "\n")), "\n")
 		arrowCount := 0

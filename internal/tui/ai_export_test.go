@@ -18,7 +18,7 @@ func TestAIExportIncludesEveryViewAndDomainWithoutExportingConnectionCredentials
 	m := testDashboard(t)
 	m.source.Config.Host.SSH, m.source.Config.Host.IdentityFile = "private-ssh-user@private-host", "hidden-identity-file"
 	m.source.Config.Sites[0].Repository = "https://owner:hidden-repository-password@example.invalid/repo?token=hidden-query"
-	m.filter, m.siteID = "alpha", "alpha"
+	m.filter, m.siteID = "example-site-a", "example-site-a"
 	m, cmd := press(m, "E")
 	m = finish(m, cmd)
 	if m.page != "export-ai" || m.menuFocus || !strings.Contains(m.frame(), "Export for AI") {
@@ -50,7 +50,7 @@ func TestAIExportIncludesEveryViewAndDomainWithoutExportingConnectionCredentials
 			t.Fatal("view omitted from export", title)
 		}
 	}
-	for _, domain := range []string{"alpha.example.invalid", "bravo.example.invalid", "charlie.example.invalid"} {
+	for _, domain := range []string{"site-a.example.invalid", "site-b.example.invalid", "site-c.example.invalid"} {
 		if !strings.Contains(text, domain) {
 			t.Fatal("selected UI filter leaked into export scope", domain)
 		}

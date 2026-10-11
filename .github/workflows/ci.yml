@@ -28,6 +28,7 @@ jobs:
           ./scripts/check.ps1
           ./scripts/build-bundles.ps1 -Targets windows-amd64
           ./scripts/test-install.ps1
+          ./scripts/test-download.ps1
       - if: runner.os == 'Linux'
         run: |
           go test -race ./...
@@ -38,6 +39,7 @@ jobs:
           HOSTOPS_STORAGE_BENCH=1 go test ./internal/storage -run '^TestTieredMetricStorageComparison$' -count=1 -v
           bash scripts/build-bundles.sh
           bash scripts/test-install.sh
+          bash scripts/test-download.sh
   systemd-lab:
     runs-on: ubuntu-latest
     timeout-minutes: 15

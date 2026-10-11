@@ -1,5 +1,28 @@
 # Install and start
 
+## Install the latest release
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Shumair99/host-ops/main/scripts/install-latest.ps1 | iex
+hostops start
+```
+
+Linux / macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Shumair99/host-ops/main/scripts/install-latest.sh | bash
+export PATH="$HOME/.local/bin:$PATH"
+hostops start
+```
+
+These commands require a published stable GitHub release. The bootstrap installer detects your workstation platform/architecture, resolves the latest stable release once, downloads the matching archive and `SHA256SUMS`, and verifies the download before extracting and running the bundle installer. It needs no Go or local Docker. Windows installation enables the command in the current PowerShell session; on Unix the explicit PATH line does the same. Re-run the install command to update.
+
+The bootstrap scripts are ordinary, readable source files in `scripts/`. Windows runs the extracted installer with a process-only execution-policy override; it does not change your permanent policy. Custom locations can be supplied to a downloaded script using the same installer options described below.
+
+## Manual installation
+
 Use the bundle matching your **computer**, not your VPS. Windows amd64/arm64 bundles are ZIPs; Linux and macOS amd64/arm64 bundles are tar.gz archives. Every bundle includes both Linux collector architectures for remote discovery and both optional VPS history agents. End users do not need Go or a source checkout.
 
 On Windows, extract the complete ZIP and double-click **Install.cmd**. The installer writes `%LOCALAPPDATA%\Programs\HostOps`, adds its `bin` folder to your user PATH, and requires no administrator privileges. Open a new terminal:
@@ -34,4 +57,6 @@ To uninstall, run the installed `Uninstall-HostOps.ps1` on Windows or `bash /pat
 
 Contributors need Go from `go.mod`. Run `scripts/build-bundles.ps1` on Windows or `bash scripts/build-bundles.sh` on Unix. Set `-Version` / `--version` and `-Targets` / `--targets` to build selected platforms. Both wrappers call the same Go builder.
 
-Each archive contains version/commit/build metadata in `bundle.json`, file checksums, installers, public documentation, examples, workstation executables and remote helper assets. The fixed public-file allowlist excludes local settings, private VPS audit reports, databases, SSH keys, build caches and repository metadata. `output/bundles/SHA256SUMS` contains the generated archive checksums. The bundle workflow creates downloadable artifacts; publication remains a separate release step.
+Each archive contains version/commit/build metadata in `bundle.json`, file checksums, installers, public documentation, examples, workstation executables and remote helper assets. The fixed public-file allowlist excludes local settings, private VPS audit reports, databases, SSH keys, build caches and repository metadata. `output/bundles/SHA256SUMS` contains the generated archive checksums.
+
+The bundle workflow builds all six workstation targets, checks the code, and exercises both the bundle and latest-release installers before publishing. A manual workflow run produces downloadable Actions artifacts. Pushing a version tag such as `v1.0.0` publishes the tested archives and checksums as a GitHub release; tags with a prerelease suffix produce prereleases that the latest installer ignores. No release is created by an ordinary branch push. macOS bundles are built by cross-compilation; the workflow's install smoke tests run on Linux and Windows.

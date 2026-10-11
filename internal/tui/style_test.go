@@ -49,7 +49,7 @@ func TestEvidenceCannotInjectTerminalControls(t *testing.T) {
 	m.source.Config.Host.Name = payload
 	for _, page := range []string{"overview", "sites", "site", "inventory", "issues"} {
 		m.page = page
-		m.siteID = "alpha"
+		m.siteID = "example-site-a"
 		frame := m.frame()
 		if strings.Contains(frame, "\x1b[2J") || strings.Contains(frame, "\x1b]52") || strings.Contains(frame, "\a") {
 			t.Fatalf("%s renders evidence controls", page)

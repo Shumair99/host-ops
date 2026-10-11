@@ -36,10 +36,10 @@ func TestJumpNavigatorOpensViewsAndGroupedPropertiesAndRestoresOnCancel(t *testi
 		t.Fatal("cancel changed the active workspace")
 	}
 	m.inputKind = "command"
-	m.input = "bravo.example.invalid"
+	m.input = "site-b.example.invalid"
 	m, cmd = press(m, "enter")
 	m = finish(m, cmd)
-	if m.page != "site" || m.siteID != "bravo" || m.menuFocus {
+	if m.page != "site" || m.siteID != "example-site-b" || m.menuFocus {
 		t.Fatal("property jump did not inspect its evidence")
 	}
 	m.inputKind = "command"
@@ -75,15 +75,15 @@ func TestNetworkRateRejectsRebootCounterResetChangedInterfacesAndGaps(t *testing
 func TestSitesSortMissingMetricsAfterMeasuredValuesAndDoesNotLoseAliasFailures(t *testing.T) {
 	m := testDashboard(t)
 	m.siteSort = 2
-	m.snapshot.Workloads["alpha"] = metrics.Sample{Values: nil}
+	m.snapshot.Workloads["example-site-a"] = metrics.Sample{Values: nil}
 	sites := m.filteredSites()
-	if sites[len(sites)-1].ID != "alpha" {
+	if sites[len(sites)-1].ID != "example-site-a" {
 		t.Fatal("missing CPU sorted as measured zero")
 	}
 	m.snapshot.Reports[1].Checks[0].State = model.Fail
 	m.snapshot.Reports[1].Overall = "critical"
 	m.siteSort = 1
-	if m.filteredSites()[0].ID != "bravo" {
+	if m.filteredSites()[0].ID != "example-site-b" {
 		t.Fatal("critical property did not sort first")
 	}
 }
@@ -91,8 +91,8 @@ func TestSitesSortMissingMetricsAfterMeasuredValuesAndDoesNotLoseAliasFailures(t
 func TestObservationMapHasNoContinuousUptimeClaimAndSanitizesEvidence(t *testing.T) {
 	m := testDashboard(t)
 	m.width = 140
-	data, _ := json.Marshal(model.Report{SiteID: "alpha", Overall: "critical", Name: "unsafe\x1b]52;c;secret\a"})
-	feed := recordFeed{Page: "monitoring", Records: []storage.Record{{Kind: "health", SiteID: "alpha", ObservedAt: time.Now().Add(-time.Hour), Data: data}}}
+	data, _ := json.Marshal(model.Report{SiteID: "example-site-a", Overall: "critical", Name: "unsafe\x1b]52;c;secret\a"})
+	feed := recordFeed{Page: "monitoring", Records: []storage.Record{{Kind: "health", SiteID: "example-site-a", ObservedAt: time.Now().Add(-time.Hour), Data: data}}}
 	text := strings.Join(m.recordWorkspace(feed, 118), "\n")
 	if !strings.Contains(text, "· no record") || !strings.Contains(text, "!") || strings.Contains(text, "uptime") || strings.Contains(text, "\x1b]52") {
 		t.Fatal("observation evidence was misrepresented", text)
@@ -151,7 +151,7 @@ func TestFrontendPreviewExport(t *testing.T) {
 		m.siteID = ""
 		m.snapshot.Detail = nil
 		if page.Page == "site" || page.Page == "logs" {
-			m.siteID = "bravo"
+			m.siteID = "example-site-b"
 		}
 		var err error
 		m.lines, err = m.source.Evidence(m.ctx, page.Page, m.siteID, "host", &m.snapshot)
@@ -186,7 +186,7 @@ func TestFrontendPreviewExport(t *testing.T) {
 		m.page = page
 		m.siteID = ""
 		if page == "site" {
-			m.siteID = "bravo"
+			m.siteID = "example-site-b"
 		}
 		var err error
 		m.lines, err = m.source.Evidence(m.ctx, page, m.siteID, "host", &m.snapshot)
@@ -211,7 +211,7 @@ func TestFrontendPreviewExport(t *testing.T) {
 	for _, page := range []string{"overview", "issues", "site"} {
 		m.page, m.siteID = page, ""
 		if page == "site" {
-			m.siteID = "alpha"
+			m.siteID = "example-site-a"
 		}
 		if err := os.WriteFile(filepath.Join(dir, "demo-dns-"+page+".txt"), []byte(m.frame()), 0600); err != nil {
 			t.Fatal(err)
@@ -224,7 +224,7 @@ func TestFrontendPreviewExport(t *testing.T) {
 	for _, page := range []string{"overview", "sites", "site"} {
 		m.page, m.siteID, m.offset = page, "", 0
 		if page == "site" {
-			m.siteID = "alpha-analytics"
+			m.siteID = "example-site-a-analytics"
 		}
 		if err := os.WriteFile(filepath.Join(dir, "demo-subdomains-"+page+".txt"), []byte(m.frame()), 0600); err != nil {
 			t.Fatal(err)

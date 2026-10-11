@@ -12,7 +12,7 @@ import (
 
 func TestTimelineCombinesRecordKindsWithoutDumpingRawStructures(t *testing.T) {
 	m := testDashboard(t)
-	_, err := m.source.Store.Add(m.ctx, m.source.Config.Host.ID, "alpha", "change", time.Now(), map[string]string{"field": "runtime.image", "before": "old", "after": "new"})
+	_, err := m.source.Store.Add(m.ctx, m.source.Config.Host.ID, "example-site-a", "change", time.Now(), map[string]string{"field": "runtime.image", "before": "old", "after": "new"})
 	if err != nil {
 		t.Fatal(err)
 	}

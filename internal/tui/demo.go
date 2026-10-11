@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"github.com/Shumair99/host-ops/internal/config"
 	"github.com/Shumair99/host-ops/internal/deployments"
 	"github.com/Shumair99/host-ops/internal/discovery"
@@ -17,8 +18,10 @@ import (
 
 func DemoConfig() config.Config {
 	c := config.Config{Host: config.Host{ID: "offline-demo", Name: "Fictional host", CaddyContainer: "demo-caddy", MonthlyCost: 12, Currency: "GBP"}, Sites: []config.Site{}}
-	for _, id := range []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot"} {
-		c.Sites = append(c.Sites, config.Site{ID: id, HostID: c.Host.ID, Name: "Example " + id, Repository: "example/" + id, Branch: "main", Runtime: config.Runtime{Type: "docker", Container: "demo-" + id, Port: 80, Network: "demo-web"}, Proxy: config.Proxy{Domain: id + ".example.invalid", Upstream: "demo-" + id + ":80"}, Health: config.Health{PublicURL: "https://" + id + ".example.invalid/healthz", ExpectedStatus: 200, TimeoutSeconds: 5, Path: "/healthz"}, Business: config.Business{MonthlyFee: 20}})
+	for index, letter := range []string{"a", "b", "c", "d", "e", "f"} {
+		id := "example-site-" + letter
+		container := "demo-site-" + letter
+		c.Sites = append(c.Sites, config.Site{ID: id, HostID: c.Host.ID, Name: fmt.Sprintf("Example Site %c", 'A'+index), Repository: "example/" + id, Branch: "main", Runtime: config.Runtime{Type: "docker", Container: container, Port: 80, Network: "demo-web"}, Proxy: config.Proxy{Domain: "site-" + letter + ".example.invalid", Upstream: container + ":80"}, Health: config.Health{PublicURL: "https://site-" + letter + ".example.invalid/healthz", ExpectedStatus: 200, TimeoutSeconds: 5, Path: "/healthz"}, Business: config.Business{MonthlyFee: 20}})
 	}
 	return c
 }
@@ -35,7 +38,7 @@ func SeedDemo(ctx context.Context, c config.Config, store *storage.Store, outage
 			}
 			r.Checks = append(r.Checks, check)
 		}
-		if outage && s.ID == "bravo" {
+		if outage && s.ID == "example-site-b" {
 			r.Runtime.Status = "exited"
 			for i := range r.Checks {
 				if r.Checks[i].Layer == "runtime" || r.Checks[i].Layer == "local_http" || r.Checks[i].Layer == "public_http" {
@@ -53,7 +56,7 @@ func SeedDemo(ctx context.Context, c config.Config, store *storage.Store, outage
 		r.Overall = model.Overall(r.Checks)
 		reports = append(reports, r)
 		sample := metrics.Sample{HostID: c.Host.ID, SiteID: s.ID, ObservedAt: now, Values: map[string]float64{"cpu_percent": 2.7 + float64(index)*2.3, "memory_used_bytes": float64(index+1) * 43.7e6}, Unavailable: []string{}}
-		if outage && s.ID == "bravo" {
+		if outage && s.ID == "example-site-b" {
 			sample.Values = map[string]float64{}
 			sample.Unavailable = []string{"Fictional stopped workload has no current stats"}
 		}
@@ -101,10 +104,10 @@ func SeedDemo(ctx context.Context, c config.Config, store *storage.Store, outage
 	if outage {
 		status = "critical"
 	}
-	if _, err := store.Add(ctx, c.Host.ID, "bravo", "event", now, map[string]string{"summary": "DEMO scenario: bravo is " + status, "after": status}); err != nil {
+	if _, err := store.Add(ctx, c.Host.ID, "example-site-b", "event", now, map[string]string{"summary": "DEMO scenario: Example Site B is " + status, "after": status}); err != nil {
 		return err
 	}
-	if _, err := store.AddOnce(ctx, c.Host.ID, "alpha", "deployment", "demo-deploy", now, deployments.Deployment{HostID: c.Host.ID, SiteID: "alpha", ID: "demo-deploy", Status: "completed", Commit: "abcdef1", HealthResult: "healthy", Origin: "offline_demo", ObservedAt: now}); err != nil {
+	if _, err := store.AddOnce(ctx, c.Host.ID, "example-site-a", "deployment", "demo-deploy", now, deployments.Deployment{HostID: c.Host.ID, SiteID: "example-site-a", ID: "demo-deploy", Status: "completed", Commit: "abcdef1", HealthResult: "healthy", Origin: "offline_demo", ObservedAt: now}); err != nil {
 		return err
 	}
 	cycles := 2
@@ -171,11 +174,11 @@ func DemoInventory(c config.Config) discovery.Registry {
 }
 
 func DemoDisk() metrics.DiskReport {
-	alpha, bravo, writable := int64(300e6), int64(400e6), int64(8e6)
-	return metrics.DiskReport{HostID: "offline-demo", ObservedAt: time.Now().UTC(), DurationSeconds: 2.4, Roots: []string{"/"}, Filesystems: []metrics.Filesystem{{Mount: "/", Type: "ext4", TotalBytes: 40e9, UsedBytes: 35.2e9, AvailableBytes: 4.5e9, Inodes: 1000000, InodesUsed: 40000}}, Sites: []metrics.SiteStorage{{SiteID: "alpha", Name: "alpha.example.invalid", DirectoryBytes: &alpha, WritableBytes: &writable}, {SiteID: "bravo", Name: "bravo.example.invalid", DirectoryBytes: &bravo, Shared: true}}, Directories: []metrics.DiskEntry{{Path: "/", Bytes: 35.2e9, Partial: true}, {Path: "/var", Parent: "/", Bytes: 13e9, Partial: true}, {Path: "/var/log (fictional)", Parent: "/var", Bytes: 3e9, Partial: true}, {Path: "/srv", Parent: "/", Bytes: 700e6}, {Path: "/srv/apps (fictional)", Parent: "/srv", Bytes: 700e6}}, Docker: []map[string]string{{"Type": "Images", "Size": "12.0 GB", "Reclaimable": "1.0 GB (fictional)"}, {"Type": "Build Cache", "Size": "6.7 GB", "Reclaimable": "4.0 GB (fictional)"}}, Unavailable: []string{"demo illustrates incomplete permission-limited directory totals"}}
+	siteA, siteB, writable := int64(300e6), int64(400e6), int64(8e6)
+	return metrics.DiskReport{HostID: "offline-demo", ObservedAt: time.Now().UTC(), DurationSeconds: 2.4, Roots: []string{"/"}, Filesystems: []metrics.Filesystem{{Mount: "/", Type: "ext4", TotalBytes: 40e9, UsedBytes: 35.2e9, AvailableBytes: 4.5e9, Inodes: 1000000, InodesUsed: 40000}}, Sites: []metrics.SiteStorage{{SiteID: "example-site-a", Name: "site-a.example.invalid", DirectoryBytes: &siteA, WritableBytes: &writable}, {SiteID: "example-site-b", Name: "site-b.example.invalid", DirectoryBytes: &siteB, Shared: true}}, Directories: []metrics.DiskEntry{{Path: "/", Bytes: 35.2e9, Partial: true}, {Path: "/var", Parent: "/", Bytes: 13e9, Partial: true}, {Path: "/var/log (fictional)", Parent: "/var", Bytes: 3e9, Partial: true}, {Path: "/srv", Parent: "/", Bytes: 700e6}, {Path: "/srv/apps (fictional)", Parent: "/srv", Bytes: 700e6}}, Docker: []map[string]string{{"Type": "Images", "Size": "12.0 GB", "Reclaimable": "1.0 GB (fictional)"}, {"Type": "Build Cache", "Size": "6.7 GB", "Reclaimable": "4.0 GB (fictional)"}}, Unavailable: []string{"demo illustrates incomplete permission-limited directory totals"}}
 }
 func DemoSecurity() security.Report {
-	return security.Report{HostID: "offline-demo", ObservedAt: time.Now().UTC(), Findings: []security.Finding{{SiteID: "alpha", State: model.Pass, Title: "Fictional non-root user", Evidence: "1000"}, {SiteID: "bravo", State: model.Warn, Title: "Fictional writable root filesystem", Investigation: "Review whether read-only execution is practical."}}, Exposures: []security.Exposure{{Container: "demo-caddy", HostPort: "443", State: model.Pass, Evidence: "Fictional proxy publication"}}, Unavailable: []string{"Offline demo; no real socket, firewall or Docker inspection occurred"}}
+	return security.Report{HostID: "offline-demo", ObservedAt: time.Now().UTC(), Findings: []security.Finding{{SiteID: "example-site-a", State: model.Pass, Title: "Fictional non-root user", Evidence: "1000"}, {SiteID: "example-site-b", State: model.Warn, Title: "Fictional writable root filesystem", Investigation: "Review whether read-only execution is practical."}}, Exposures: []security.Exposure{{Container: "demo-caddy", HostPort: "443", State: model.Pass, Evidence: "Fictional proxy publication"}}, Unavailable: []string{"Offline demo; no real socket, firewall or Docker inspection occurred"}}
 }
 func DemoPreflight(c config.Config) preflight.Report {
 	impact, _ := preflight.Dependency(c, "host")

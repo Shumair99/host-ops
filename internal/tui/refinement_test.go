@@ -73,7 +73,7 @@ func TestRecentActivityResolvesLegacyIDsAndKeepsFutureRemovedNames(t *testing.T)
 	m.snapshot.Sites[0].ID = "site-generated-id"
 	e := storage.Record{SiteID: "site-generated-id", Kind: "event"}
 	e.Data = json.RawMessage(`{"type":"health_changed","before":"unknown","after":"healthy"}`)
-	if label := recordLabel(e, m.snapshot.Sites); label != "alpha.example.invalid" {
+	if label := recordLabel(e, m.snapshot.Sites); label != "site-a.example.invalid" {
 		t.Fatal(label)
 	}
 	if s := activitySummary(e); s != "Health observed: healthy" || strings.Contains(s, "recovered") {
@@ -92,11 +92,11 @@ func TestActivityCombinesDeploymentsAndDeduplicatesTheSameHealthTransition(t *te
 		kind string
 		data any
 	}{{"event", map[string]string{"type": "health_changed", "before": "healthy", "after": "critical"}}, {"change", map[string]string{"field": "health", "before": "healthy", "after": "critical"}}, {"deployment", map[string]string{"status": "completed", "commit": "abc"}}} {
-		if _, err := m.source.Store.Add(m.ctx, m.source.Config.Host.ID, "alpha", v.kind, at, v.data); err != nil {
+		if _, err := m.source.Store.Add(m.ctx, m.source.Config.Host.ID, "example-site-a", v.kind, at, v.data); err != nil {
 			t.Fatal(err)
 		}
 	}
-	records, err := m.source.activity(m.ctx, "alpha", 100)
+	records, err := m.source.activity(m.ctx, "example-site-a", 100)
 	if err != nil {
 		t.Fatal(err)
 	}

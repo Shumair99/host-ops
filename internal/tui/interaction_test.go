@@ -118,9 +118,9 @@ func TestMouseWheelScrollsContentUnderPointerAndStopsAtEdges(t *testing.T) {
 
 func TestEscapeReturnsThroughSiteAndToolsHierarchy(t *testing.T) {
 	m := testDashboard(t)
-	m.page, m.siteID, m.menuFocus = "logs", "alpha", false
+	m.page, m.siteID, m.menuFocus = "logs", "example-site-a", false
 	m, _ = press(m, "esc")
-	if m.page != "site" || m.siteID != "alpha" {
+	if m.page != "site" || m.siteID != "example-site-a" {
 		t.Fatal("site logs did not return to the same inspector")
 	}
 	m, _ = press(m, "esc")

@@ -60,7 +60,7 @@ func TestAliasFindingsDoNotBorrowPrimaryDomainLocalEvidence(t *testing.T) {
 	m := testDashboard(t)
 	base := m.snapshot.Sites[0]
 	alias := base
-	alias.ID, alias.Proxy.Domain = "example-site-a-www", "www.site-a.example.invalid"
+	alias.ID, alias.Proxy.Domain = "example-site-a-www", "www.site-a.example"
 	m.snapshot.Sites = append(m.snapshot.Sites, alias)
 	m.source.Config.Sites = append(m.source.Config.Sites, alias)
 	m.snapshot.Reports = append(m.snapshot.Reports, model.Report{SiteID: alias.ID, Overall: "critical", Checks: []model.Check{{Layer: "local_http", State: model.Skip}, {Layer: "public_http", State: model.Fail, StatusCode: 502}}})

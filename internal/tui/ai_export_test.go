@@ -50,7 +50,7 @@ func TestAIExportIncludesEveryViewAndDomainWithoutExportingConnectionCredentials
 			t.Fatal("view omitted from export", title)
 		}
 	}
-	for _, domain := range []string{"site-a.example.invalid", "site-b.example.invalid", "site-c.example.invalid"} {
+	for _, domain := range []string{"site-a.example", "site-b.example", "site-c.example"} {
 		if !strings.Contains(text, domain) {
 			t.Fatal("selected UI filter leaked into export scope", domain)
 		}

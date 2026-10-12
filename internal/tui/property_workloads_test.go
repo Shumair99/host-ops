@@ -14,7 +14,7 @@ import (
 func relatedDomainDashboard(m dashboard) dashboard {
 	child := m.snapshot.Sites[0]
 	child.ID, child.Name = "example-site-a-analytics", "Example analytics"
-	child.Proxy.Domain, child.Runtime.Container = "analytics.site-a.example.invalid", "demo-analytics"
+	child.Proxy.Domain, child.Runtime.Container = "analytics.site-a.example", "demo-analytics"
 	child.Proxy.Upstream = child.Runtime.Container + ":80"
 	child.Health.PublicURL = "https://" + child.Proxy.Domain + "/healthz"
 	m.snapshot.Sites = append(m.snapshot.Sites, child)
@@ -56,7 +56,7 @@ func TestSubdomainPropertyKeepsIndependentHealthResourcesAndNavigation(t *testin
 		t.Fatal("grouping duplicated a property or changed independent health")
 	}
 	matrix := ansi.Strip(strings.Join(m.healthMatrix(122, 8), "\n"))
-	if strings.Contains(matrix, child.Proxy.Domain) || !strings.Contains(matrix, "site-a.example.invalid +1") || !strings.Contains(matrix, "CRITICAL") {
+	if strings.Contains(matrix, child.Proxy.Domain) || !strings.Contains(matrix, "site-a.example +1") || !strings.Contains(matrix, "CRITICAL") {
 		t.Fatal("subdomain escaped the property row or hid a failure", matrix)
 	}
 	ranking := ansi.Strip(strings.Join(m.pressureRanking(122, 20, "memory_used_bytes"), "\n"))
@@ -110,11 +110,11 @@ func TestPropertyGroupingRespectsSuffixBoundariesAndObservedParents(t *testing.T
 func TestResourceRowsDeduplicateOnlyTheSameWorkloadAndPreferItsNewestSample(t *testing.T) {
 	m := relatedDomainDashboard(testDashboard(t))
 	alias := m.snapshot.Sites[0]
-	alias.ID, alias.Proxy.Domain = "example-site-a-www", "www.site-a.example.invalid"
+	alias.ID, alias.Proxy.Domain = "example-site-a-www", "www.site-a.example"
 	m.snapshot.Sites = append(m.snapshot.Sites, alias)
 	m.snapshot.Workloads[alias.ID] = metrics.Sample{ObservedAt: time.Now().Add(time.Second), Values: map[string]float64{"cpu_percent": 19, "memory_used_bytes": 43.7e6}}
 	readings := m.workloadReadings(groupFor(m.rawSites(), "example-site-a").domains())
-	if len(readings) != 2 || readings[0].Sample.Values["cpu_percent"] != 19 || readings[0].Label != "site-a.example.invalid" || readings[1].Sample.Values["cpu_percent"] != 31 {
+	if len(readings) != 2 || readings[0].Sample.Values["cpu_percent"] != 19 || readings[0].Label != "site-a.example" || readings[1].Sample.Values["cpu_percent"] != 31 {
 		t.Fatal("alias duplicated a workload or analytics lost its independent sample", readings)
 	}
 }

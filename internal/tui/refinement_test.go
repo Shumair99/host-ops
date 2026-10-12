@@ -73,7 +73,7 @@ func TestRecentActivityResolvesLegacyIDsAndKeepsFutureRemovedNames(t *testing.T)
 	m.snapshot.Sites[0].ID = "site-generated-id"
 	e := storage.Record{SiteID: "site-generated-id", Kind: "event"}
 	e.Data = json.RawMessage(`{"type":"health_changed","before":"unknown","after":"healthy"}`)
-	if label := recordLabel(e, m.snapshot.Sites); label != "site-a.example.invalid" {
+	if label := recordLabel(e, m.snapshot.Sites); label != "site-a.example" {
 		t.Fatal(label)
 	}
 	if s := activitySummary(e); s != "Health observed: healthy" || strings.Contains(s, "recovered") {

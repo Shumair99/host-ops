@@ -36,7 +36,7 @@ func TestJumpNavigatorOpensViewsAndGroupedPropertiesAndRestoresOnCancel(t *testi
 		t.Fatal("cancel changed the active workspace")
 	}
 	m.inputKind = "command"
-	m.input = "site-b.example.invalid"
+	m.input = "site-b.example"
 	m, cmd = press(m, "enter")
 	m = finish(m, cmd)
 	if m.page != "site" || m.siteID != "example-site-b" || m.menuFocus {

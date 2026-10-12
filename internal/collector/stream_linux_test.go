@@ -17,7 +17,10 @@ import (
 func TestStreamCanOmitHostSamplingWhileKeepingInventory(t *testing.T) {
 	for _, skip := range []bool{false, true} {
 		t.Run(map[bool]string{false: "session", true: "continuous"}[skip], func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			// A complete inventory scan can take longer than a few seconds on a
+			// busy CI runner. Stop explicitly once the stream has demonstrated the
+			// requested behavior, and retain a generous deadline for regressions.
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
 			inR, inW := io.Pipe()
 			outR, outW := io.Pipe()
@@ -29,6 +32,8 @@ func TestStreamCanOmitHostSamplingWhileKeepingInventory(t *testing.T) {
 			}
 			inventory, metrics, workloads := false, 0, 0
 			inventoryPending, workloadPending := false, false
+			inventoryScans := 0
+			refreshRequested, canceledDuringRefresh := false, false
 			decoder := json.NewDecoder(outR)
 			for {
 				var frame Message
@@ -43,6 +48,11 @@ func TestStreamCanOmitHostSamplingWhileKeepingInventory(t *testing.T) {
 				}
 				if frame.Kind == "inventory_pending" {
 					inventoryPending = true
+					inventoryScans++
+					if refreshRequested && inventoryScans > 1 {
+						canceledDuringRefresh = true
+						cancel()
+					}
 				}
 				if frame.Kind == "workload_pending" {
 					workloadPending = true
@@ -56,14 +66,20 @@ func TestStreamCanOmitHostSamplingWhileKeepingInventory(t *testing.T) {
 				if frame.Kind == "host_metrics" {
 					metrics++
 				}
+				if !refreshRequested && inventory && workloads > 0 && (skip || metrics > 0) {
+					if err := json.NewEncoder(inW).Encode(Control{Kind: "refresh"}); err != nil {
+						t.Fatalf("request inventory refresh: %v", err)
+					}
+					refreshRequested = true
+				}
 			}
 			if err := <-done; err != nil {
 				t.Fatal(err)
 			}
 			outR.Close()
 			inR.Close()
-			if !inventory || workloads == 0 || (skip && metrics != 0) || (!skip && metrics == 0) {
-				t.Fatalf("inventory=%v host frames=%d workload batches=%d skip=%v", inventory, metrics, workloads, skip)
+			if !inventory || workloads == 0 || (skip && metrics != 0) || (!skip && metrics == 0) || !refreshRequested || !canceledDuringRefresh {
+				t.Fatalf("inventory=%v host frames=%d workload batches=%d skip=%v refresh=%v canceled during refresh=%v", inventory, metrics, workloads, skip, refreshRequested, canceledDuringRefresh)
 			}
 		})
 	}

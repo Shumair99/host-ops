@@ -161,7 +161,9 @@ func TestAllTrendLevelsUseClassicWindowsConsoleGlyphs(t *testing.T) {
 }
 
 func TestOverviewExcludesOldAndFutureSamples(t *testing.T) {
-	now := time.Now()
+	// Keep now away from a fixed bucket boundary so the one-second-old sample
+	// deterministically belongs to the current (last) bucket.
+	now := time.Unix(1_700_000_000, 0).Add(17 * time.Second)
 	samples := []metrics.Sample{{ObservedAt: now.Add(-time.Hour), Values: map[string]float64{"cpu_percent": 99}}, {ObservedAt: now.Add(time.Minute), Values: map[string]float64{"cpu_percent": 100}}, {ObservedAt: now.Add(-time.Second), Values: map[string]float64{"cpu_percent": 38}}}
 	buckets := recentBuckets(samples, "cpu_percent", 12, now)
 	for i, b := range buckets {

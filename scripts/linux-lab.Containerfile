@@ -3,8 +3,8 @@ FROM docker.io/library/debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gcc libc6-dev systemd systemd-sysv procps iproute2 \
     && rm -rf /var/lib/apt/lists/*
-RUN curl -fsSL https://go.dev/dl/go1.27.2.linux-amd64.tar.gz -o /tmp/go.tar.gz \
-    && echo 'ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5  /tmp/go.tar.gz' | sha256sum -c - \
+RUN curl -fsSL https://go.dev/dl/go1.27.3.linux-amd64.tar.gz -o /tmp/go.tar.gz \
+    && echo '65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40  /tmp/go.tar.gz' | sha256sum -c - \
     && tar -C /usr/local -xzf /tmp/go.tar.gz && rm /tmp/go.tar.gz
 ENV PATH=/usr/local/go/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ENV GOTOOLCHAIN=local

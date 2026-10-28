@@ -132,3 +132,56 @@ func TestInspectingSubdomainCannotReuseAnotherDomainsHistory(t *testing.T) {
 		t.Fatal("unobserved subdomain inherited primary-domain history", err, m.snapshot.SiteHistory)
 	}
 }
+
+func TestRedirectPropertyUsesServingRuntimeAndOmitsRedirectWorkload(t *testing.T) {
+	m := testDashboard(t)
+	base := m.snapshot.Sites[0]
+	root := base
+	root.ID, root.Name = "therapy-apex", "thetherapyspot.co.uk"
+	root.Proxy.Domain, root.Proxy.Upstream = "thetherapyspot.co.uk", ""
+	root.Proxy.RedirectTo = "www.thetherapyspot.co.uk"
+	root.Runtime = config.Runtime{Type: "unresolved"}
+	target := base
+	target.ID, target.Name = "therapy-www", "www.thetherapyspot.co.uk"
+	target.Proxy.Domain, target.Proxy.Upstream = "www.thetherapyspot.co.uk", "thetherapyspot:80"
+	target.Proxy.RedirectTo = ""
+	target.Runtime = config.Runtime{Type: "docker", Container: "thetherapyspot", Port: 80}
+	m.snapshot.Sites = []config.Site{root, target}
+	m.source.Config.Sites = []config.Site{root, target}
+	rootReport := m.snapshot.Reports[0]
+	rootReport.SiteID, rootReport.Name = root.ID, root.Name
+	rootReport.Runtime = model.Runtime{SiteID: root.ID, Type: "unresolved", Status: "unknown"}
+	targetReport := m.snapshot.Reports[0]
+	targetReport.SiteID, targetReport.Name = target.ID, target.Name
+	targetReport.Runtime = model.Runtime{SiteID: target.ID, Type: "docker", Name: "thetherapyspot", Status: "running", Health: "healthy", Image: "thetherapyspot:746c2cc", Commit: "746c2cc8c1eb2a6970611a43a3e6155d8c48c14f"}
+	m.snapshot.Reports = []model.Report{rootReport, targetReport}
+	now := time.Now()
+	m.snapshot.Workloads = map[string]metrics.Sample{
+		root.ID:   {SiteID: root.ID, ObservedAt: now, Values: map[string]float64{}},
+		target.ID: {SiteID: target.ID, ObservedAt: now, Values: map[string]float64{"cpu_percent": 8.4, "memory_used_bytes": 8.57 * 1024 * 1024}},
+	}
+
+	group := groupFor(m.rawSites(), root.ID)
+	if group.Primary.ID != target.ID || len(group.Children) != 1 || group.Children[0].ID != root.ID {
+		t.Fatalf("confirmed redirect destination was not selected as the property runtime: %+v", group)
+	}
+	if sites := m.sites(); len(sites) != 1 || sites[0].ID != target.ID {
+		t.Fatalf("property list did not use the serving address: %+v", sites)
+	}
+	readings := m.workloadReadings(group.domains())
+	if len(readings) != 1 || readings[0].Label != target.Proxy.Domain || readings[0].Sample.Values["cpu_percent"] != 8.4 {
+		t.Fatalf("redirect was listed as a separate workload or target sample was lost: %+v", readings)
+	}
+	details := ansi.Strip(strings.Join(m.siteDetails(root, 120, false), "\n"))
+	for _, want := range []string{"docker / running", "thetherapyspot:80", "thetherapyspot:746c2cc", "746c2cc8c1eb2a6970611a43a3e6155d8c48c14f", "8.4%", "8.6 MiB", "Runtime source  www.thetherapyspot.co.uk"} {
+		if !strings.Contains(details, want) {
+			t.Fatalf("redirect inspection did not display destination runtime detail %q:\n%s", want, details)
+		}
+	}
+	inspector := ansi.Strip(strings.Join(m.inspectorSummary(root, 120), "\n"))
+	for _, want := range []string{"ROUTE  www.thetherapyspot.co.uk → thetherapyspot:80", "REDIRECT  thetherapyspot.co.uk → www.thetherapyspot.co.uk", "thetherapyspot:746c2cc", "746c2cc8c1eb2a6970611a43a3e6155d8c48c14f"} {
+		if !strings.Contains(inspector, want) {
+			t.Fatalf("property inspector did not resolve destination detail %q:\n%s", want, inspector)
+		}
+	}
+}

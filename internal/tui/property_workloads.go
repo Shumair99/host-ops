@@ -53,6 +53,9 @@ func (m dashboard) workloadReadings(sites []config.Site) []workloadReading {
 	indices := map[string]int{}
 	for _, g := range groupSites(sites) {
 		for _, s := range g.domains() {
+			if s.Proxy.RedirectTo != "" {
+				continue // A confirmed redirect has no independent application workload.
+			}
 			sample := m.snapshot.Workloads[s.ID]
 			if (s.Runtime.Type == "" || s.Runtime.Type == "external") && len(sample.Values) == 0 {
 				continue // Domain-only observations are not measured workloads.

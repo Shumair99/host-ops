@@ -117,9 +117,10 @@ func runtimeAge(r model.Runtime) string {
 func (m dashboard) siteDetails(s config.Site, w int, compact bool) []string {
 	t, r := m.theme, m.report(s.ID)
 	group := groupFor(m.rawSites(), s.ID)
-	primary := domainReport(s, reportsByID(m.snapshot.Reports))
+	runtimeSite := propertyRuntimeSite(group.domains(), s)
+	primary := domainReport(runtimeSite, reportsByID(m.snapshot.Reports))
 	multiple := len(m.workloadReadings(group.domains())) > 1
-	sample := m.snapshot.Workloads[s.ID]
+	sample := m.snapshot.Workloads[runtimeSite.ID]
 	mem := "—"
 	uptime := "—"
 	if (primary.Runtime.Status == "running" || primary.Runtime.Status == "active") && layerState(primary, "runtime") == model.Pass {
@@ -134,6 +135,9 @@ func (m dashboard) siteDetails(s config.Site, w int, compact bool) []string {
 	}
 	if compact {
 		rows = append(rows, clean(s.Proxy.Domain))
+		if runtimeSite.ID != s.ID {
+			rows = append(rows, "Runtime source  "+clean(runtimeSite.Proxy.Domain)+" (redirect destination)")
+		}
 		if multiple {
 			rows = append(rows, m.propertyWorkloadRows(group, w)...)
 			rows = append(rows, "Uptime "+uptime)
@@ -151,7 +155,10 @@ func (m dashboard) siteDetails(s config.Site, w int, compact bool) []string {
 			rows = append(rows, t.strong(stateMark(state), statusColor(string(state)))+" "+t.paint(pad(layerLabel(layer), 13), muted)+" "+t.badge(string(state)))
 		}
 		rows = append(rows, "")
-		for _, field := range [][2]string{{"Runtime", s.Runtime.Type + " / " + r.Runtime.Status}, {"CPU", percent(value(sample.Values, "cpu_percent"))}, {"Memory", mem}, {"HTTP", httpLatency(r)}, {"Uptime", uptime}, {"Restarts", fmt.Sprint(r.Runtime.RestartCount)}, {"Upstream", unknown(s.Proxy.Upstream)}, {"Image", unknown(r.Runtime.Image)}, {"Revision", unknown(r.Runtime.Commit)}, {"Attention", attention(r)}} {
+		if runtimeSite.ID != s.ID {
+			rows = append(rows, "Runtime source  "+clean(runtimeSite.Proxy.Domain)+" (redirect destination)")
+		}
+		for _, field := range [][2]string{{"Runtime", runtimeSite.Runtime.Type + " / " + primary.Runtime.Status}, {"CPU", percent(value(sample.Values, "cpu_percent"))}, {"Memory", mem}, {"HTTP", httpLatency(r)}, {"Uptime", uptime}, {"Restarts", fmt.Sprint(primary.Runtime.RestartCount)}, {"Upstream", unknown(runtimeSite.Proxy.Upstream)}, {"Image", unknown(primary.Runtime.Image)}, {"Revision", unknown(primary.Runtime.Commit)}, {"Attention", attention(r)}} {
 			if multiple && (field[0] == "CPU" || field[0] == "Memory") {
 				continue
 			}

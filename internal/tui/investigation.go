@@ -23,16 +23,21 @@ var toolExplanations = map[string][]string{
 
 func (m dashboard) inspectorSummary(s config.Site, w int) []string {
 	t, r := m.theme, m.report(s.ID)
-	rows := []string{t.badge(r.Overall) + "  " + clean(s.Runtime.Type) + " / " + clean(r.Runtime.Status) + "  " + t.paint("HTTP "+httpLatency(r), muted)}
+	runtimeSite := propertyRuntimeSite(groupFor(m.rawSites(), s.ID).domains(), s)
+	runtimeReport := domainReport(runtimeSite, reportsByID(m.snapshot.Reports))
+	rows := []string{t.badge(r.Overall) + "  " + clean(runtimeSite.Runtime.Type) + " / " + clean(runtimeReport.Runtime.Status) + "  " + t.paint("HTTP "+httpLatency(r), muted)}
 	if finding := primaryFinding(r); finding != "" {
 		rows = append(rows, wrap([]string{t.strong(finding, amber)}, w-4)...)
 	}
-	rows = append(rows, t.paint("ROUTE", muted)+"  "+clean(s.Proxy.Domain)+" → "+clean(unknown(s.Proxy.Upstream)))
-	rows = append(rows, t.paint("RUNTIME", muted)+"  "+clean(unknown(r.Runtime.Name))+" · "+clean(unknown(r.Runtime.Image)))
-	rows = append(rows, t.paint("REVISION", muted)+" "+clean(unknown(r.Runtime.Commit))+fmt.Sprintf(" · restarts %d", r.Runtime.RestartCount))
+	rows = append(rows, t.paint("ROUTE", muted)+"  "+clean(runtimeSite.Proxy.Domain)+" → "+clean(unknown(runtimeSite.Proxy.Upstream)))
+	if runtimeSite.ID != s.ID {
+		rows = append(rows, t.paint("REDIRECT", muted)+"  "+clean(s.Proxy.Domain)+" → "+clean(runtimeSite.Proxy.Domain))
+	}
+	rows = append(rows, t.paint("RUNTIME", muted)+"  "+clean(unknown(runtimeReport.Runtime.Name))+" · "+clean(unknown(runtimeReport.Runtime.Image)))
+	rows = append(rows, t.paint("REVISION", muted)+" "+clean(unknown(runtimeReport.Runtime.Commit))+fmt.Sprintf(" · restarts %d", runtimeReport.Runtime.RestartCount))
 	out := t.panel("SITE PASSPORT / operating context", rows, w)
-	if len(m.snapshot.SiteHistory) > 0 && m.snapshot.SiteHistory[0].SiteID == s.ID {
-		sample := m.snapshot.Workloads[s.ID]
+	if len(m.snapshot.SiteHistory) > 0 && m.snapshot.SiteHistory[0].SiteID == runtimeSite.ID {
+		sample := m.snapshot.Workloads[runtimeSite.ID]
 		if w >= 76 {
 			a := (w - 1) / 2
 			out = append(out, columns(m.signalPanel("Workload CPU / 30m", "cpu_percent", "%", cyan, 0, m.snapshot.SiteHistory, value(sample.Values, "cpu_percent"), a, 3), m.signalPanel("Workload memory / 30m", "memory_used_bytes", "B", violet, 0, m.snapshot.SiteHistory, value(sample.Values, "memory_used_bytes"), w-a-1, 3), a, w-a-1)...)

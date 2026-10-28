@@ -57,9 +57,19 @@ func groupSites(sites []config.Site) []siteGroup {
 		}
 	}
 	for i := range groups {
+		members := groups[i].domains()
+		if serving := propertyRuntimeSite(members, groups[i].Primary); serving.ID != groups[i].Primary.ID {
+			groups[i].Primary = serving
+			groups[i].Children = nil
+			for _, member := range members {
+				if member.ID != serving.ID {
+					groups[i].Children = append(groups[i].Children, member)
+				}
+			}
+		}
 		sort.SliceStable(groups[i].Children, func(a, b int) bool {
 			x, y := groups[i].Children[a].Proxy.Domain, groups[i].Children[b].Proxy.Domain
-			www := "www." + domainKey(groups[i].Primary.Proxy.Domain)
+			www := "www." + strings.TrimPrefix(domainKey(groups[i].Primary.Proxy.Domain), "www.")
 			if domainKey(x) == www || domainKey(y) == www {
 				return domainKey(x) == www && domainKey(y) != www
 			}
@@ -70,6 +80,47 @@ func groupSites(sites []config.Site) []siteGroup {
 		return config.DomainLess(siteLabel(groups[i].Primary), siteLabel(groups[j].Primary))
 	})
 	return groups
+}
+
+// A property should lead with the endpoint that actually serves the application
+// when its observed parent is only a redirect. Follow only explicit redirects
+// to domains present in this group, and promote only a destination with a
+// concrete runtime. A missing target, cycle or domain-only target leaves the
+// existing parent choice intact.
+func propertyRuntimeSite(sites []config.Site, source config.Site) config.Site {
+	byDomain := map[string]config.Site{}
+	for _, site := range sites {
+		if domain := domainKey(site.Proxy.Domain); domain != "" {
+			byDomain[domain] = site
+		}
+	}
+	current := source
+	visited := map[string]bool{}
+	followed := false
+	for {
+		domain := domainKey(current.Proxy.Domain)
+		if domain == "" || visited[domain] {
+			return source
+		}
+		visited[domain] = true
+		targetDomain := domainKey(current.Proxy.RedirectTo)
+		if targetDomain == "" {
+			if followed && hasConcreteRuntime(current) {
+				return current
+			}
+			return source
+		}
+		target, ok := byDomain[targetDomain]
+		if !ok || visited[targetDomain] {
+			return source
+		}
+		current = target
+		followed = true
+	}
+}
+
+func hasConcreteRuntime(site config.Site) bool {
+	return site.Runtime.Type != "" && site.Runtime.Type != "unresolved" && site.Runtime.Type != "external"
 }
 
 func (g siteGroup) domains() []config.Site {
